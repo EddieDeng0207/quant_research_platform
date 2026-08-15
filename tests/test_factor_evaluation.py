@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -60,7 +61,10 @@ def _factor_inputs(periods: int = 30, securities: int = 30):
                         "forward_return": 0.0025 * residual + noise,
                     }
                 )
-    return pd.DataFrame(observations), pd.DataFrame(labels)
+    observation_frame = pd.DataFrame(observations)
+    label_frame = pd.DataFrame(labels)
+    label_frame["outcome_observation_end_at"] = label_frame["label_end_at"].max()
+    return observation_frame, label_frame
 
 
 def _spec() -> FactorEvaluationSpec:
@@ -82,10 +86,119 @@ def test_factor_evaluation_is_pit_neutralized_and_promotable():
     assert len(result.ic_series) == 60
     assert (result.horizon_summary["mean_rank_ic"] > 0.9).all()
     assert (result.horizon_summary["mean_top_minus_bottom_return"] > 0).all()
-    assert result.factor_exposures["exposure_value"].abs().max() < 1e-8
+    sanity = result.factor_exposures.loc[
+        result.factor_exposures["scope"] == "full_cross_section_sanity"
+    ]
+    assert sanity["exposure_value"].abs().max() < 1e-8
     target_sums = result.target_weights.groupby("decision_at")["target_weight"].sum()
     assert np.allclose(target_sums.to_numpy(), 0.98)
     assert len(result.distribution) == 30
+    nw_lags = result.horizon_summary.set_index("horizon_sessions")["newey_west_lags"]
+    assert nw_lags.to_dict() == {5: 1, 20: 4}
+    assert result.quality["decision_frequency"]["inferred_periods_per_year"] == pytest.approx(
+        52.1775, rel=1e-4
+    )
+    assert result.turnover.iloc[0]["one_way_turnover"] == pytest.approx(0.98)
+    assert {
+        "raw_rank_ic",
+        "residualized_rank_ic",
+        "raw_top_minus_bottom_return",
+        "residualized_top_minus_bottom_return",
+    }.issubset(result.ic_series.columns)
+
+
+def test_quantile_portfolio_exposure_gate_catches_tail_concentration():
+    observations, labels = _factor_inputs(periods=3, securities=240)
+    security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)
+    industry_number = security_number % 6
+    small = (security_number % 7) < 2
+    within_industry = (security_number // 6) % 40 - 19.5
+    scale = np.where(industry_number == 5, 4.0, 1.0) * np.where(small, 2.0, 1.0)
+    observations["industry_code"] = "I" + industry_number.astype(str)
+    observations["market_cap"] = np.where(small, 3e8, 3e9).astype(float)
+    observations["factor_value"] = within_industry * scale
+    spec = FactorEvaluationSpec(
+        factor_name="heteroskedastic_tail",
+        factor_family="fundamental",
+        min_cross_section=200,
+        min_ic_observations=100,
+        min_evaluation_periods=2,
+    )
+
+    result = evaluate_single_factor(observations, labels, spec)
+
+    assert not result.quality["promotion_passed"]
+    failures = result.quality["hard_failures"]
+    assert failures["top_bottom_industry_active_weight_breach_rows"] > 0
+    assert failures["top_bottom_log_market_cap_z_breach_rows"] > 0
+    assert failures["neutralization_first_order_industry_sanity_breach_rows"] == 0
+    assert failures["neutralization_first_order_size_sanity_breach_rows"] == 0
+
+
+def test_label_coverage_excludes_structural_tail_by_horizon():
+    observations, labels = _factor_inputs()
+    horizon20_ends = sorted(labels.loc[labels["horizon_sessions"] == 20, "label_end_at"].unique())
+    sample_end = horizon20_ends[-4]
+    labels["outcome_observation_end_at"] = sample_end
+    structural_tail = labels["label_end_at"] > sample_end
+    labels.loc[structural_tail, "forward_return"] = np.nan
+
+    result = evaluate_single_factor(observations, labels, _spec())
+
+    horizon20 = result.label_coverage.set_index("horizon_sessions").loc[20]
+    assert horizon20["structural_tail_rows"] == 90
+    assert horizon20["unexpected_missing_rows"] == 0
+    assert horizon20["match_rate"] == 1.0
+    assert result.quality["promotion_passed"]
+
+    internally_missing = labels.drop(labels.index[0]).copy()
+    strict_spec = replace(_spec(), minimum_label_match_rate=0.9999)
+    missing_result = evaluate_single_factor(observations, internally_missing, strict_spec)
+    assert missing_result.quality["unexpected_missing_label_rows"] == 1
+    assert (
+        missing_result.quality["hard_failures"]
+        ["horizon_label_match_rate_below_threshold"]
+        == 1
+    )
+
+
+def test_frequency_mismatch_and_single_member_industry_fail_closed():
+    observations, labels = _factor_inputs()
+    with pytest.raises(FactorEvaluationError, match="annualization_periods disagrees"):
+        evaluate_single_factor(
+            observations,
+            labels,
+            replace(_spec(), annualization_periods=12),
+        )
+
+    for decision_at in observations["decision_at"].unique():
+        first = observations.index[observations["decision_at"] == decision_at][0]
+        observations.loc[first, "industry_code"] = "SINGLE_MEMBER"
+    with pytest.raises(FactorEvaluationError, match="no cross-section passed"):
+        evaluate_single_factor(
+            observations,
+            labels,
+            replace(_spec(), min_industry_members=2),
+        )
+
+
+def test_institutional_defaults_and_declared_outcome_cutoff_are_enforced():
+    defaults = FactorEvaluationSpec(
+        factor_name="default_profile", factor_family="fundamental"
+    )
+    assert defaults.min_cross_section == 200
+    assert defaults.min_ic_observations == 100
+    assert defaults.min_evaluation_periods == 104
+    assert defaults.min_industry_members == 5
+
+    observations, labels = _factor_inputs(periods=2)
+    labels["outcome_observation_end_at"] = labels["label_end_at"].min()
+    with pytest.raises(FactorEvaluationError, match="beyond outcome_observation_end_at"):
+        evaluate_single_factor(
+            observations,
+            labels,
+            replace(_spec(), min_evaluation_periods=2),
+        )
 
 
 def test_factor_timing_and_outcome_direction_fail_closed():
@@ -145,7 +258,9 @@ def test_factor_artifact_is_deterministic_and_report_verifies_hashes(tmp_path: P
     )
     assert first == second
     manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == "p07_single_factor_evaluation_v2"
     assert manifest["quality"]["promotion_passed"]
+    assert "label_coverage" in manifest["outputs"]
     report = generate_factor_evaluation_report(first, tmp_path / "report.md")
     assert "门禁通过不等于因子具有投资价值" in report.read_text(encoding="utf-8")
 

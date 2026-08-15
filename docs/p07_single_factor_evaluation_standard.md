@@ -26,7 +26,9 @@ IC/Rank IC、分层收益、单调性、衰减、换手、年度稳定性与行�
 - 分析师预期额外要求冻结的 `estimate_vintage_at`。
 
 未来收益标签至少包含 `instrument_id`、`execution_at`、`horizon_sessions`、
-`label_start_at`、`label_end_at` 和 `forward_return`。系统强制要求：
+`label_start_at`、`label_end_at`、`outcome_observation_end_at` 和
+`forward_return`。`outcome_observation_end_at` 是全文件唯一的冻结样本终点；
+标签文件必须保留超出样本终点的结构性空标签行。系统强制要求：
 
 ```text
 event_at <= available_at <= decision_at < execution_at
@@ -34,6 +36,11 @@ ingested_at <= decision_at
 label_start_at >= execution_at
 label_end_at > label_start_at
 ```
+
+只有 `label_end_at > outcome_observation_end_at` 的空标签属于样本末端自然截断，
+可以从该 horizon 的匹配率分母剔除。样本内部缺行或
+`label_end_at <= outcome_observation_end_at` 但收益为空，均记为意外缺失。这样
+长持有期不会因自然截断被误杀，整期数据缺口也不会被错当成结构性尾部。
 
 收益标签只能参与事后评测，不能进入缩尾、中性化、排序或目标权重构建。
 因子观测按 `(instrument_id, decision_at)` 唯一，收益标签按
@@ -53,8 +60,20 @@ label_end_at > label_start_at
 usable eligible observations / all eligible observations
 ```
 
-默认每期不少于 20 个有效证券，且每期覆盖率不得低于 80%。缺失值不做横截
-面均值填充，也不使用未来值回填。
+机构周频档位默认每期不少于 200 个有效证券，IC 最少 100 只，每个 horizon
+至少 104 期（约两年周频），且每期覆盖率不得低于 80%。测试或探索可以显式
+降低这些值，但参数会进入产物身份，不能冒充正式档位。缺失值不做横截面均值
+填充，也不使用未来值回填。
+
+中性化的动态样本下限为：
+
+```text
+max(configured_min_cross_section, neutralization_industry_count + 3)
+```
+
+其中行业虚拟变量列数加一列对数市值，并额外保留两个残差自由度。这个下限
+依赖当期实际行业数，因此在读取截面后执行，而不是由无法看到数据的 dataclass
+`validate()` 猜测。
 
 ### 2. 稳健缩尾
 
@@ -68,7 +87,12 @@ lower/upper = median(x) +/- 5 * robust_sigma
 MAD 为零意味着该期因子退化，系统不切换到另一套隐式算法，而是记录失败。
 选择 MAD 而不是固定全样本分位点，是为了降低极端值影响并避免跨期信息混用。
 
-### 3. 行业和市值中性化
+### 3. 稀疏行业与行业、市值中性化
+
+默认要求每个中性化行业至少 5 只证券。低于门槛的原始行业先合并为
+`__OTHER__`，同时保留原始 `industry_code` 供组合暴露审计。如果合并后的
+`__OTHER__` 仍不足 5 只，该期直接失败。这样避免单成员行业的独热列把该证券
+残差机械压成零并永久塞进中间组。
 
 缩尾值先做截面标准化，再回归于完整行业虚拟变量和标准化对数市值：
 
@@ -82,8 +106,24 @@ z_winsor = industry_dummies * beta_industry
 回归残差的加权标准分；预期方向为负的因子乘以 `-1`，使较高
 `signal_score` 始终代表较高预期收益。
 
-每个决策日保存逐行业加权残余均值和因子与对数市值的加权相关系数，绝对值
-超过 `1e-8` 即视为实现或数值异常，不允许晋级。
+每个决策日保存逐行业加权残余均值和因子与对数市值的加权相关系数。它们是
+WLS 一阶条件，只用于验证线性代数和数值实现，正式名称为
+`full_cross_section_sanity`；绝对值超过 `1e-8` 说明实现或数值异常，但其为零
+不代表尾部组合中性。
+
+真正的风险暴露门禁逐 quantile 计算：
+
+```text
+industry_active_weight(q, j)
+  = weight(q, industry_j) - weight(universe, industry_j)
+
+size_active_z(q)
+  = mean_q(z(log_market_cap)) - mean_universe(z(log_market_cap))
+```
+
+门禁作用于 Top 和 Bottom 组，默认单行业主动权重绝对值不超过 5 个百分点，
+对数市值标准分偏离绝对值不超过 0.25。Top 组是送入 P0.6.3 的实际目标组合，
+因此不能用全截面均值正交替代组合暴露审计。
 
 ## 评测方法
 
@@ -93,10 +133,22 @@ z_winsor = industry_dummies * beta_industry
 - 多空分层差：最高组减最低组，仅作为诊断；
 - 单调性：分组序号与分组平均收益的相关系数；
 - 衰减：同一信号在不同 `horizon_sessions` 下分别统计；
-- 换手：Top 组等权多头目标的单边权重变化，首次建仓按总投入权重计算；
+- 换手：Top 组等权多头目标的单边权重变化；组合从 100% 现金开始，统一使用
+  `0.5 * sum(abs(delta_weight))`，因此首次 98% 建仓的单边换手为 98%，后续
+  也使用同一公式；
 - 年度稳定性：逐自然年、逐持有期独立汇总；
-- 显著性：IC 与分层差使用默认 4 阶 Newey-West 长期方差修正；
-- ICIR：按显式冻结的观测频率年化，周频默认 52。
+- 频率校验：从相邻 `decision_at` 的中位日历间隔推断实际年频，与冻结的周频
+  52 比较，默认相对偏差超过 15% 直接失败；
+- 显著性：每个 horizon 自动使用
+  `ceil(horizon_sessions / inferred_trading_sessions_per_period)` 阶
+  Newey-West，且不少于冻结的最小阶数；
+- ICIR：使用同一 Newey-West 长期方差计算 HAC 年化 ICIR，不再用朴素标准差
+  和 `sqrt(52)` 混用方差假设。
+
+默认主报告口径为“中性化因子对原始未来收益”，与常见因子研究口径一致；
+同时对未来收益使用相同的行业/市值 WLS 残差化，并保存原始收益和残差收益的
+IC、Rank IC、分层差。`return_basis` 可冻结为 `raw` 或 `residualized`，主表只
+展示选定口径，禁止跨口径直接比较。
 
 P0.7 不以 IC、t 值或分层差是否为正作为工程晋级门禁。这样可以保证负面研究
 结果不会因“没有 alpha”被删除。多因子批量比较时再使用实验登记中的
@@ -110,6 +162,7 @@ Benjamini-Hochberg FDR 控制。
 - `factor_panel.parquet`：原始、缩尾、标准化、中性化和最终信号；
 - `coverage.parquet`、`distribution.parquet`；
 - `factor_exposures.parquet`；
+- `label_coverage.parquet`：逐 horizon 的结构性尾部、内部缺失和匹配率；
 - `ic_series.parquet`、`quantile_returns.parquet`；
 - `turnover.parquet`、`target_weights.parquet`；
 - `horizon_summary.parquet`、`annual_summary.parquet`；
@@ -124,10 +177,14 @@ Benjamini-Hochberg FDR 控制。
 
 - 截面样本不足、因子退化或中性化矩阵秩不足；
 - 任一成功处理期覆盖率低于冻结阈值；
-- 未来收益标签匹配率低于默认 95%；
-- 任一持有期少于默认 26 个有效评测期；
+- 任一 horizon 排除结构性尾部后的标签匹配率低于默认 95%；
+- 任一持有期少于默认 104 个有效周频评测期；
 - 任一期缺少最高或最低分组；
-- 行业残余均值或市值相关超过数值容忍度。
+- WLS 一阶条件 sanity check 超过 `1e-8`；
+- Top/Bottom 任一行业主动权重超过默认 5 个百分点；
+- Top/Bottom 对数市值标准分偏离超过默认 0.25；
+- 实际决策频率与冻结年化频率不一致；
+- 稀疏行业合并后仍不足最低成员数。
 
 门禁只证明数据、时点、统计和工程过程达到标准，不证明因子未来有效。
 

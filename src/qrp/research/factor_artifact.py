@@ -74,6 +74,7 @@ def build_factor_evaluation_artifact(
         "coverage": result.coverage,
         "distribution": result.distribution,
         "factor_exposures": result.factor_exposures,
+        "label_coverage": result.label_coverage,
         "ic_series": result.ic_series,
         "quantile_returns": result.quantile_returns,
         "turnover": result.turnover,
@@ -85,7 +86,14 @@ def build_factor_evaluation_artifact(
         "factor_panel": ["decision_at", "instrument_id"],
         "coverage": ["decision_at"],
         "distribution": ["decision_at"],
-        "factor_exposures": ["decision_at", "exposure_type", "exposure_name"],
+        "factor_exposures": [
+            "decision_at",
+            "scope",
+            "quantile",
+            "exposure_type",
+            "exposure_name",
+        ],
+        "label_coverage": ["horizon_sessions"],
         "ic_series": ["decision_at", "horizon_sessions"],
         "quantile_returns": ["decision_at", "horizon_sessions", "quantile"],
         "turnover": ["decision_at"],
@@ -106,7 +114,7 @@ def build_factor_evaluation_artifact(
         }
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p07_single_factor_evaluation_v1",
+        "schema_version": "p07_single_factor_evaluation_v2",
         "identity": identity,
         "factor_spec": {**asdict(frozen), "sha256": frozen.fingerprint},
         "inputs": {
@@ -123,7 +131,13 @@ def build_factor_evaluation_artifact(
             "cross_sections_processed_independently": True,
             "mad_winsorization": True,
             "industry_and_log_size_neutralization": True,
-            "newey_west_statistics": True,
+            "first_order_conditions_are_numerical_sanity_checks_only": True,
+            "top_bottom_portfolio_exposure_limits": True,
+            "structural_label_tail_excluded_by_horizon": True,
+            "decision_frequency_inferred_and_validated": True,
+            "horizon_specific_newey_west_lags": True,
+            "hac_adjusted_annualized_icir": True,
+            "raw_and_residualized_return_diagnostics": True,
             "long_only_targets_are_diagnostic_until_p063_backtest": True,
             "formal_cli_requires_clean_git": True,
             "git_commit_bound": code_identity is not None,
@@ -149,7 +163,7 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
     if not manifest_path.exists():
         raise FactorEvaluationError(f"factor manifest not found: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != "p07_single_factor_evaluation_v1":
+    if manifest.get("schema_version") != "p07_single_factor_evaluation_v2":
         raise FactorEvaluationError("report input is not a P0.7 factor artifact")
     for name, metadata in manifest["outputs"].items():
         path = root / metadata["path"]
@@ -162,6 +176,9 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         ["year", "horizon_sessions"]
     )
     turnover = pd.read_parquet(root / "turnover.parquet")
+    label_coverage = pd.read_parquet(root / "label_coverage.parquet").sort_values(
+        "horizon_sessions"
+    )
     quality = manifest["quality"]
     spec = manifest["factor_spec"]
     identity = manifest["identity"]
@@ -180,6 +197,7 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         "",
         f"- 因子族：`{spec['factor_family']}`",
         f"- 方向：`{spec['expected_direction']}`",
+        f"- 主报告收益口径：`{spec['return_basis']}`",
         f"- 参数 SHA-256：`{identity['spec_sha256']}`",
         f"- 观测输入 SHA-256：`{identity['observations_sha256']}`",
         f"- 收益标签 SHA-256：`{identity['forward_returns_sha256']}`",
@@ -192,16 +210,39 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         f"- 决策日/成功处理日：{quality['decision_dates']}/{quality['prepared_dates']}",
         f"- 有效因子行：{quality['prepared_rows']}",
         f"- 覆盖率中位数/最小值：{_pct(quality['median_coverage'])}/{_pct(quality['minimum_coverage_observed'])}",
-        f"- 未来收益标签匹配率：{_pct(quality['label_match_rate'])}",
+        f"- 非结构性未来收益标签匹配率：{_pct(quality['label_match_rate'])}",
+        f"- 结构性样本末端标签行：{quality['structural_tail_label_rows']}",
+        f"- 样本内部意外缺失标签行：{quality['unexpected_missing_label_rows']}",
+        f"- 推断年频/冻结年频：{quality['decision_frequency']['inferred_periods_per_year']:.2f}/{spec['annualization_periods']}",
+        f"- 推断每次决策间隔交易日：{quality['decision_frequency']['trading_sessions_per_period']:.0f}",
+        f"- Top/Bottom 最大行业主动权重：{_pct(quality['maximum_top_bottom_industry_active_weight'])}",
+        f"- Top/Bottom 最大对数市值标准分偏离：{_number(quality['maximum_top_bottom_log_market_cap_z'])}",
+        "",
+        "## 分持有期标签覆盖",
+        "",
+        "| 持有期 | 理论行 | 结构性尾部 | 可评测行 | 成功匹配 | 内部缺失 | 匹配率 |",
+        "|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in label_coverage.to_dict("records"):
+        lines.append(
+            f"| {int(row['horizon_sessions'])} | {int(row['expected_rows'])} | "
+            f"{int(row['structural_tail_rows'])} | "
+            f"{int(row['structurally_available_rows'])} | {int(row['matched_rows'])} | "
+            f"{int(row['unexpected_missing_rows'])} | {_pct(row['match_rate'])} |"
+        )
+    lines.extend(
+        [
         "",
         "## 不同持有期结果",
         "",
-        "| 持有期(交易日) | 期数 | Pearson IC | Rank IC | 年化 ICIR | Rank IC NW t | IC 胜率 | 多空分层差 | 分层差 NW t | 单调性 |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-    ]
+        "| 持有期(交易日) | NW阶数 | 期数 | Pearson IC | Rank IC | HAC年化ICIR | Rank IC NW t | IC胜率 | 多空分层差 | 分层差 NW t | 单调性 |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
     for row in horizons.to_dict("records"):
         lines.append(
-            f"| {int(row['horizon_sessions'])} | {int(row['periods'])} | "
+            f"| {int(row['horizon_sessions'])} | {int(row['newey_west_lags'])} | "
+            f"{int(row['periods'])} | "
             f"{_number(row['mean_pearson_ic'])} | {_number(row['mean_rank_ic'])} | "
             f"{_number(row['annualized_rank_ic_ir'])} | "
             f"{_number(row['rank_ic_newey_west_t'])} | "
@@ -247,6 +288,8 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
             "",
             "- 因子观测和未来收益标签物理分表；未来收益仅用于事后评测。",
             "- IC、分层差和 Newey-West t 值是研究诊断，不是可成交收益承诺。",
+            f"- 主表使用 `{spec['return_basis']}` 收益口径；产物同时保存原始收益和行业/市值残差收益诊断，禁止跨口径直接比较。",
+            "- 全截面回归一阶条件仅作为线性代数 sanity check；真正的风格门禁作用于 Top/Bottom 组合的行业主动权重和市值标准分偏离。",
             "- 分层多空差仅用于辨别因子排序能力；A 股现金多头的可实现表现必须把 `target_weights.parquet` 送入 P0.6.3 执行回测。",
             "- P0.7 不以 IC 正负作为数据质量门禁，负面结果必须和正面结果一样保留。",
             "- 多因子合成、正交化顺序选择和组合优化不属于本产物。",

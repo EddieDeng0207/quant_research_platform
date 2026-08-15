@@ -347,9 +347,10 @@ def _build_parser() -> argparse.ArgumentParser:
     factor.add_argument("--expected-direction", type=int, choices=(-1, 1), default=1)
     factor.add_argument("--quantiles", type=int, default=5)
     factor.add_argument("--winsor-mad-multiplier", type=float, default=5.0)
-    factor.add_argument("--min-cross-section", type=int, default=20)
-    factor.add_argument("--min-ic-observations", type=int, default=20)
-    factor.add_argument("--min-evaluation-periods", type=int, default=26)
+    factor.add_argument("--min-cross-section", type=int, default=200)
+    factor.add_argument("--min-ic-observations", type=int, default=100)
+    factor.add_argument("--min-evaluation-periods", type=int, default=104)
+    factor.add_argument("--min-industry-members", type=int, default=5)
     factor.add_argument("--minimum-coverage", type=float, default=0.80)
     factor.add_argument("--minimum-label-match-rate", type=float, default=0.95)
     factor.add_argument(
@@ -359,7 +360,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     factor.add_argument("--target-gross-weight", type=float, default=0.98)
     factor.add_argument("--annualization-periods", type=int, default=52)
-    factor.add_argument("--newey-west-lags", type=int, default=4)
+    factor.add_argument("--annualization-frequency-tolerance", type=float, default=0.15)
+    factor.add_argument("--minimum-newey-west-lags", type=int, default=1)
+    factor.add_argument(
+        "--return-basis", choices=("raw", "residualized"), default="raw"
+    )
+    factor.add_argument(
+        "--max-top-bottom-industry-active-weight", type=float, default=0.05
+    )
+    factor.add_argument(
+        "--max-top-bottom-log-market-cap-z", type=float, default=0.25
+    )
     factor.add_argument("--output-root", default="data/curated")
     factor.add_argument("--allow-failed-promotion", action="store_true")
     factor.add_argument(
@@ -544,12 +555,23 @@ def main(argv: List[str] = None) -> int:
                 min_cross_section=args.min_cross_section,
                 min_ic_observations=args.min_ic_observations,
                 min_evaluation_periods=args.min_evaluation_periods,
+                min_industry_members=args.min_industry_members,
                 minimum_coverage=args.minimum_coverage,
                 minimum_label_match_rate=args.minimum_label_match_rate,
                 neutralization_weighting=args.neutralization_weighting,
                 target_gross_weight=args.target_gross_weight,
                 annualization_periods=args.annualization_periods,
-                newey_west_lags=args.newey_west_lags,
+                annualization_frequency_tolerance=(
+                    args.annualization_frequency_tolerance
+                ),
+                minimum_newey_west_lags=args.minimum_newey_west_lags,
+                return_basis=args.return_basis,
+                max_top_bottom_industry_active_weight=(
+                    args.max_top_bottom_industry_active_weight
+                ),
+                max_top_bottom_log_market_cap_z=(
+                    args.max_top_bottom_log_market_cap_z
+                ),
             ),
             require_clean_git=not args.allow_dirty_code,
             strict=not args.allow_failed_promotion,
