@@ -50,9 +50,15 @@ def test_git_identity_environment_lock_and_source_archive_are_recoverable():
         assert len(identity.tree) == 40
         lock = environment_lock_identity(repository)
         assert len(lock["sha256"]) == 64
+        subprocess.run(
+            ["git", "tag", "-a", "v1.0.0", "-m", "release"],
+            cwd=repository,
+            check=True,
+        )
         archive = archive_committed_source(
             repository,
             root / "source_bundle.tar",
+            commit="v1.0.0",
         )
         assert archive["commit"] == identity.commit
         assert archive["bytes"] > 0
