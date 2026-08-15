@@ -1,0 +1,29 @@
+{
+  "release": "v0.7.0",
+  "status": "single_factor_research_framework",
+  "source_pr": 2,
+  "release_ref": "refs/tags/v0.7.0",
+  "schema_registry": {
+    "p07_single_factor_evaluation": "p07_single_factor_evaluation_v3"
+  },
+  "tracked_evidence": {
+    "factor_evaluation_standard": {
+      "path": "docs/p07_single_factor_evaluation_standard.md",
+      "sha256": "bab01b95c81fa6d3644b1f076f0707e7dcc4d8f12bbe09d26f92f1812366b2e5"
+    },
+    "version_control_standard": {
+      "path": "docs/version_control_and_release_standard.md",
+      "sha256": "6562bd02a69e5114ebee1f21be235762c99c34902b30e30a8a296e5b7f0afd5d"
+    },
+    "environment_lock": {
+      "path": "requirements.lock",
+      "sha256": "836882d0d8a77242a92e29a1cd2f19ede916e2fb44f30ff4f52eeb59f67b2fb0"
+    }
+  },
+  "promoted_artifacts": {},
+  "limitations": [
+    "This release promotes the P0.7 research framework and engineering gates, not evidence that any factor has investment value.",
+    "No live-data P0.7 factor artifact is promoted in this release.",
+    "Licensed and large data remain outside Git and require the content-addressed lake or an authorized immutable backup."
+  ]
+}
