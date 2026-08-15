@@ -1,0 +1,33 @@
+{
+  "a_share": {
+    "primary": "tushare",
+    "fallback_and_cross_check": "akshare",
+    "required_datasets": [
+      "instruments",
+      "historical_instruments",
+      "security_code_mappings",
+      "trading_calendar",
+      "daily_bars_raw",
+      "daily_limits",
+      "daily_suspensions",
+      "stock_status",
+      "adjustment_factors",
+      "daily_indicators",
+      "fundamentals_income",
+      "fundamentals_balance_sheet",
+      "fundamentals_cashflow",
+      "fundamentals_financial_indicators"
+    ]
+  },
+  "macro": {
+    "primary": "fred_alfred",
+    "point_in_time_mode": true
+  },
+  "deferred": {
+    "us_market_data": ["polygon", "yfinance"],
+    "us_fundamentals": ["sec_edgar"],
+    "secondary_a_share": ["baostock"],
+    "analyst_expectations": ["licensed_vendor_required"],
+    "alternative_data": ["dataset_specific_contract_required"]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "aliases": [
+    {
+      "provider": "tushare",
+      "current_symbol": "302132.SZ",
+      "historical_symbol": "300114.SZ",
+      "effective_date": "2025-02-17",
+      "stable_instrument_id": "CN_EQ:AVIC_CAC_20100827",
+      "reason": "Exchange-approved security-code change; legal listed entity continued",
+      "evidence": "https://static.cninfo.com.cn/finalpage/2025-02-15/1222544408.PDF"
+    }
+  ]
+}

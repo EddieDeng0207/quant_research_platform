@@ -1,0 +1,174 @@
+{
+  "artifact_id": "7b1f5b51d226b720fd50",
+  "identity": {
+    "config": {
+      "cash_buffer": 0.02,
+      "raw_end": "2023-12-29",
+      "raw_start": "2022-09-01",
+      "selection_policy": "fixed_before_backtest_systems_pilot_not_alpha_evidence",
+      "symbols": [
+        "000001.SZ",
+        "000333.SZ",
+        "000651.SZ",
+        "600000.SH",
+        "600036.SH",
+        "600276.SH",
+        "600519.SH",
+        "601318.SH",
+        "601398.SH",
+        "601857.SH"
+      ],
+      "target_policy": "frozen_ten_name_equal_weight_monthly_v1"
+    },
+    "implementation_sha256": "d16edea7bbd8d380d347307b7074643648b438644c106a8dbff52957f915d334",
+    "p05_artifact_id": "e37326cee45d351375da",
+    "p05_sha256": "200ea0eeca1e8402428d229a37f772aabe836a2b8f632afd2e61d502d46171f6",
+    "raw_inputs": [
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034249-2992ff3d6c47.parquet",
+        "sha256": "c4ac1bad633d8be8a5fdf7c44c8e25224ce1454d6d674483acfe36003a3dfd64",
+        "symbol": "000001.SZ"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-fbe2d06b9d31.parquet",
+        "sha256": "27a2a5718e9a4856996397fcbc6a2d1a7ba02af6170d121367763181ffbfb963",
+        "symbol": "000333.SZ"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-2af4ae8f5a14.parquet",
+        "sha256": "0f65c06406d8b97b59a371eeeee3c01e1d3b5e9a5e90e8ff4e85c96476dedfe7",
+        "symbol": "000651.SZ"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-996d7aaf09d2.parquet",
+        "sha256": "d926b2555ca867b07acbd9e00c9d6693ba7808097615c5ee23bc08eefa9c3b16",
+        "symbol": "600000.SH"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-82e460e8232e.parquet",
+        "sha256": "4e4659d87c921d6c1bc3847d38287dfede582cb486eec5c91bd9111c82aee1ba",
+        "symbol": "600036.SH"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-ccd6835ad43d.parquet",
+        "sha256": "50b705da814d0bfe83323c7e3029efe288fe2c51f3e845399a2eeefa922102d6",
+        "symbol": "600276.SH"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-22fcc967dea6.parquet",
+        "sha256": "7604b8db8daebd7bdb4971c1a538d786532e5f6db8d60862f1687617c789683e",
+        "symbol": "600519.SH"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-71f3393ebdc7.parquet",
+        "sha256": "b7a19c7856acbf0c3755dd1c1e3627f2ec55f8a149db7ec2258f49054a16d084",
+        "symbol": "601318.SH"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-c02486ab8505.parquet",
+        "sha256": "7b5205fc6b5f23e975c67885b71618b0d348578812c6ff89a72279d8d9eef10b",
+        "symbol": "601398.SH"
+      },
+      {
+        "dataset": "daily_bars",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-15/part-034250-30b79976882a.parquet",
+        "sha256": "b83c39885e6efb23beadc286eb0338364d5c907b81780867464bc227e97cedd8",
+        "symbol": "601857.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-37041cd68c40.parquet",
+        "sha256": "b7d3367c5e0ca03c8b894460ccc840acb22a7a9520595f06320befe88df54461",
+        "symbol": "000001.SZ"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-a9f520215c42.parquet",
+        "sha256": "fd0a7949cb5d2ec77a08c0b8ada4621b148c1d81ce757401d903a111a544050c",
+        "symbol": "000333.SZ"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-f2650d25952c.parquet",
+        "sha256": "da85d4f1121a81035026be43cd6981a2596b570e96f928f02a439f60224e1d76",
+        "symbol": "000651.SZ"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-bd4e767e6bbb.parquet",
+        "sha256": "9de02ee4f34a05112ddb20b729237a97228e938e86175e67cdb390ed7bc4abe2",
+        "symbol": "600000.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-9deb56222411.parquet",
+        "sha256": "e6611d5adc3dbf659bc0c1ee846c2e42799ff4ecc21ecd2b401105d0b117d320",
+        "symbol": "600036.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-721ab6f08f2f.parquet",
+        "sha256": "1acc66d9753fbbb01c35875788fbf1757a0ce4c68e5cbd1ba199bf0e90ece0ef",
+        "symbol": "600276.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-033860b58101.parquet",
+        "sha256": "1402f4347fd8e1ea51f88ee36c3b013c571e143f840a0897d09858a229097d22",
+        "symbol": "600519.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-7172edc8b9f0.parquet",
+        "sha256": "d94d8d4d6657f7a5decafdd9a957676f089f559286058e25a01704ea6c030839",
+        "symbol": "601318.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-b4ce1b915aa5.parquet",
+        "sha256": "190674b2ac5056f3b4bc5c8ec27ba92a5a32f6b0137a861fc92bdb51c465c68d",
+        "symbol": "601398.SH"
+      },
+      {
+        "dataset": "daily_indicators",
+        "path": "data/lake/raw/provider=tushare/dataset=daily_indicators/ingest_date=2026-08-15/part-034307-0db5b5440a40.parquet",
+        "sha256": "d0ee195f8e53aeb76a0fea2d7c549aa9ab0b56e2e2fc6625709ad119f16dd78f",
+        "symbol": "601857.SH"
+      }
+    ]
+  },
+  "limitations": [
+    "Fixed names are suitable for a systems pilot, not an unbiased alpha claim.",
+    "The mechanical target deliberately contains no optimized research signal."
+  ],
+  "outputs": {
+    "capacity": {
+      "path": "artifacts/pilots/p062_one_year/artifact_id=7b1f5b51d226b720fd50/capacity.parquet",
+      "rows": 2420,
+      "sha256": "9a79ed6b7ffa2d3fbf421299b02b1716c00eedd271987e65d4298946fd66149d"
+    },
+    "targets": {
+      "path": "artifacts/pilots/p062_one_year/artifact_id=7b1f5b51d226b720fd50/targets.parquet",
+      "rows": 120,
+      "sha256": "edc75eca0ce787234cd717f91aaf05458170f477d71bae6e8aad01472e7d3112"
+    }
+  },
+  "quality": {
+    "capacity_complete_sessions": 242,
+    "p05_sessions": 242,
+    "promotion_passed": true,
+    "rebalance_sessions": 12,
+    "symbols": 10,
+    "target_weight_sum": 0.98
+  },
+  "schema_version": "p062_one_year_pilot_inputs_v1"
+}

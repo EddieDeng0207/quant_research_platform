@@ -1,0 +1,34 @@
+{
+  "release": "v0.6.3",
+  "status": "reproducibility_baseline",
+  "artifact_registry": {
+    "p063_backtest": {
+      "artifact_id": "a91ad104d9a2aa11dbbc",
+      "local_manifest": "data/curated/backtests/artifact_id=a91ad104d9a2aa11dbbc/manifest.json",
+      "manifest_sha256": "b01a1a473b8be340735c15a4aafafd43356f8c36d429e4e92ff8c150f573cae5",
+      "schema_version": "p063_portfolio_backtest_v1"
+    }
+  },
+  "tracked_evidence": {
+    "validation_report": {
+      "path": "artifacts/reports/p063_validation_2023.md",
+      "sha256": "0f458c7ea9a640b6dbf4561df26f3820bcb051f7fb8342b5133f8d3bf0e1828a"
+    },
+    "generated_report": {
+      "path": "artifacts/reports/p063_portfolio_backtest_2023_a91ad104d9a2aa11dbbc.md",
+      "sha256": "f033487747908730a760a462e994f64456f0d8772188c56935eb91447bafd294"
+    },
+    "lake_audit": {
+      "path": "artifacts/audits/p063_lake_audit.json",
+      "sha256": "ba7c176cf8fd2f9c650c2ef8946a0e250d9c5973c9369a3bbae01dad169cdb88"
+    },
+    "environment_lock": {
+      "path": "requirements.lock",
+      "sha256": "836882d0d8a77242a92e29a1cd2f19ede916e2fb44f30ff4f52eeb59f67b2fb0"
+    }
+  },
+  "limitations": [
+    "This is the first Git-governed baseline; earlier code evolution has no Git commit history.",
+    "Licensed and large data remain outside Git and require the local content-addressed lake or an authorized backup."
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "credential_values_recorded": false,
+  "events": [
+    {
+      "adj_close": 8.77,
+      "adj_factor": 16.1051,
+      "available_at": "2024-07-18 08:00:00+00:00",
+      "close": 8.77,
+      "factor_change": 0.03669777920823947,
+      "raw_close_return_1d": -0.02986725663716805,
+      "symbol": "600000.SH",
+      "total_return_1d": 0.005734460581444667,
+      "trade_date": "2024-07-18 00:00:00"
+    }
+  ],
+  "formula": "(close_t * factor_t) / (close_t_minus_1 * factor_t_minus_1) - 1",
+  "generated_at": "2026-08-14T22:13:27.445054+00:00",
+  "input_logical_sha256": {
+    "adjustment_factors": "cac8a0fb589674e6f9b9265f02c88141213b751c2bad1422bcc9e5380d6c4b8f",
+    "bars": "bebf02711284dc1206454a2f7481d0badb334fcc631161d1ebd5fe06e87c9217"
+  },
+  "input_rows": {
+    "adjustment_factors": 242,
+    "bars": 242
+  },
+  "material_factor_change_threshold": 0.0001,
+  "query": {
+    "end": "2024-12-31",
+    "start": "2024-01-01",
+    "symbol": "600000.SH"
+  },
+  "source": "tushare"
+}

@@ -1,0 +1,161 @@
+{
+  "errors": [],
+  "files_checked": 71,
+  "manifest_entries": 71,
+  "passed": true,
+  "rows_checked": 222646,
+  "warnings": [
+    {
+      "error": "historical_instruments is missing required columns: ['list_date']",
+      "path": "raw/provider=tushare/dataset=historical_instruments/ingest_date=2026-08-14/trade_date=2024-01-02/part-224738-9b50da3ddd9e.parquet",
+      "type": "superseded_contract_failure"
+    },
+    {
+      "error": "historical_instruments is missing required columns: ['list_date']",
+      "path": "raw/provider=tushare/dataset=historical_instruments/ingest_date=2026-08-14/trade_date=2024-01-03/part-224744-574e2454abac.parquet",
+      "type": "superseded_contract_failure"
+    },
+    {
+      "error": "historical_instruments is missing required columns: ['list_date']",
+      "path": "raw/provider=tushare/dataset=historical_instruments/ingest_date=2026-08-14/trade_date=2024-01-04/part-224750-53e9f481c846.parquet",
+      "type": "superseded_contract_failure"
+    },
+    {
+      "error": "historical_instruments is missing required columns: ['list_date']",
+      "path": "raw/provider=tushare/dataset=historical_instruments/ingest_date=2026-08-14/trade_date=2024-01-05/part-224755-0706a1475617.parquet",
+      "type": "superseded_contract_failure"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=instruments/ingest_date=2026-08-14/part-215216-23b7b4a7b34d.parquet",
+        "raw/provider=tushare/dataset=instruments/ingest_date=2026-08-14/part-224203-2eed613c8a94.parquet",
+        "raw/provider=tushare/dataset=instruments/ingest_date=2026-08-14/part-224736-586181711a41.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-02/part-215219-92e7f2f0f327.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-02/part-224206-f0156964516e.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-02/part-224740-80c8a753b8c3.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-03/part-215223-b3e61a3c4009.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-03/part-224304-d013e720a0c8.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-03/part-224746-fa615d87e41b.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-04/part-215514-dcfee29f6399.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-04/part-224308-79be8c7899a4.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-04/part-224751-9c519416ce49.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-05/part-215519-edc802051e24.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-05/part-224313-ce4f8b3fb81d.parquet",
+        "raw/provider=tushare/dataset=daily_bars/ingest_date=2026-08-14/trade_date=2024-01-05/part-224757-1f354930766a.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=trading_calendar/ingest_date=2026-08-14/part-224204-365f16a3f4af.parquet",
+        "raw/provider=tushare/dataset=trading_calendar/ingest_date=2026-08-14/part-224737-b5c5c15d3182.parquet",
+        "raw/provider=tushare/dataset=trading_calendar/ingest_date=2026-08-14/part-225241-f04c6e789fd4.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-02/part-224301-64c4ca0ad94d.parquet",
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-02/part-224741-a6be0671548a.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-02/part-224302-be4c42cd536d.parquet",
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-02/part-224742-743913f3f222.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-02/part-224302-959a14c499bd.parquet",
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-02/part-224743-0ee73060ceb9.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-03/part-224306-686d9d8b1ad2.parquet",
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-03/part-224747-1898973c846f.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-03/part-224306-7eb0f5c453f9.parquet",
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-03/part-224748-0086a71ef261.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-03/part-224307-1d87ea92cad0.parquet",
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-03/part-224748-210624b26b3d.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-04/part-224310-f185f41d0982.parquet",
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-04/part-224753-8a5772c94650.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-04/part-224310-9e8c6aa434a0.parquet",
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-04/part-224753-adc675f2f655.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-04/part-224311-237b090e1ef3.parquet",
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-04/part-224754-33a15c2a7cdd.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-05/part-224507-01d07f838034.parquet",
+        "raw/provider=tushare/dataset=daily_limits/ingest_date=2026-08-14/trade_date=2024-01-05/part-224758-bd85ae34d059.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-05/part-224508-0746662912ff.parquet",
+        "raw/provider=tushare/dataset=daily_suspensions/ingest_date=2026-08-14/trade_date=2024-01-05/part-224759-9d9c1033861e.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    },
+    {
+      "paths": [
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-05/part-224508-3c25219ba76b.parquet",
+        "raw/provider=tushare/dataset=stock_status/ingest_date=2026-08-14/trade_date=2024-01-05/part-224800-7cc1afcfec27.parquet"
+      ],
+      "type": "duplicate_logical_query"
+    }
+  ]
+}
