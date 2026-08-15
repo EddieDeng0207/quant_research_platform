@@ -34,14 +34,15 @@ class FactorEvaluationSpec:
     minimum_coverage: float = 0.80
     minimum_label_match_rate: float = 0.95
     neutralization_weighting: str = "sqrt_market_cap"
-    max_top_bottom_industry_active_weight: float = 0.05
-    max_top_bottom_log_market_cap_z: float = 0.25
+    industry_active_weight_floor: float = 0.05
+    log_market_cap_z_floor: float = 0.25
+    exposure_sampling_sigma_multiplier: float = 4.0
     target_gross_weight: float = 0.98
     annualization_periods: int = 52
     annualization_frequency_tolerance: float = 0.15
     minimum_newey_west_lags: int = 1
     return_basis: str = "raw"
-    version: str = "p07_single_factor_evaluation_v2"
+    version: str = "p07_single_factor_evaluation_v3"
 
     def validate(self) -> "FactorEvaluationSpec":
         if not self.factor_name.strip():
@@ -68,10 +69,12 @@ class FactorEvaluationSpec:
             raise ValueError("minimum_label_match_rate must be in (0, 1]")
         if self.neutralization_weighting not in {"equal", "sqrt_market_cap"}:
             raise ValueError("unsupported neutralization_weighting")
-        if not 0 <= self.max_top_bottom_industry_active_weight <= 1:
-            raise ValueError("max_top_bottom_industry_active_weight must be in [0, 1]")
-        if self.max_top_bottom_log_market_cap_z < 0:
-            raise ValueError("max_top_bottom_log_market_cap_z must be non-negative")
+        if not 0 <= self.industry_active_weight_floor <= 1:
+            raise ValueError("industry_active_weight_floor must be in [0, 1]")
+        if self.log_market_cap_z_floor < 0:
+            raise ValueError("log_market_cap_z_floor must be non-negative")
+        if self.exposure_sampling_sigma_multiplier <= 0:
+            raise ValueError("exposure_sampling_sigma_multiplier must be positive")
         if not 0 < self.target_gross_weight <= 1:
             raise ValueError("target_gross_weight must be in (0, 1]")
         if not 0 <= self.annualization_frequency_tolerance <= 1:
@@ -335,6 +338,7 @@ def _prepare_factor_panel(
                 decision_at,
                 usable,
                 regression_weights,
+                spec,
             )
         )
     if not panels:
@@ -471,26 +475,52 @@ def _evaluate_periods(
             continue
         score = group["signal_score"].to_numpy(dtype=float)
         raw_returns = group["forward_return"].to_numpy(dtype=float)
-        residual_returns, _ = _residualize(
-            raw_returns,
-            group["neutralization_industry_code"],
-            group["market_cap"].to_numpy(dtype=float),
-            spec.neutralization_weighting,
-        )
         raw_metrics = _cross_section_return_metrics(
             score, raw_returns, group["quantile"], spec.quantiles
         )
-        residual_metrics = _cross_section_return_metrics(
-            score, residual_returns, group["quantile"], spec.quantiles
+        try:
+            residual_returns, _ = _residualize(
+                raw_returns,
+                group["neutralization_industry_code"],
+                group["market_cap"].to_numpy(dtype=float),
+                spec.neutralization_weighting,
+            )
+            residual_metrics = _cross_section_return_metrics(
+                score, residual_returns, group["quantile"], spec.quantiles
+            )
+            residualization_status = "ok"
+            residualization_error = ""
+        except FactorEvaluationError as error:
+            residual_returns = np.full(count, np.nan)
+            residual_metrics = {
+                "pearson_ic": np.nan,
+                "rank_ic": np.nan,
+                "top_minus_bottom_return": np.nan,
+                "quantile_monotonicity": np.nan,
+            }
+            residualization_status = f"failed:{type(error).__name__}"
+            residualization_error = str(error)
+        use_residualized = (
+            spec.return_basis == "residualized" and residualization_status == "ok"
         )
-        primary = raw_metrics if spec.return_basis == "raw" else residual_metrics
+        primary = residual_metrics if use_residualized else raw_metrics
+        effective_return_basis = (
+            "residualized"
+            if use_residualized
+            else "raw_fallback"
+            if spec.return_basis == "residualized"
+            else "raw"
+        )
         ic_rows.append(
             {
                 "decision_at": decision_at,
                 "decision_date": group["decision_date"].iloc[0],
                 "horizon_sessions": int(horizon),
                 "observations": count,
-                "return_basis": spec.return_basis,
+                "configured_return_basis": spec.return_basis,
+                "return_basis": effective_return_basis,
+                "residualization_status": residualization_status,
+                "residualization_error": residualization_error,
                 "pearson_ic": primary["pearson_ic"],
                 "rank_ic": primary["rank_ic"],
                 "top_minus_bottom_return": primary["top_minus_bottom_return"],
@@ -520,9 +550,12 @@ def _evaluate_periods(
                     "horizon_sessions": int(horizon),
                     "quantile": int(quantile),
                     "observations": len(quantile_group),
-                    "return_basis": spec.return_basis,
+                    "configured_return_basis": spec.return_basis,
+                    "return_basis": effective_return_basis,
+                    "residualization_status": residualization_status,
+                    "residualization_error": residualization_error,
                     "equal_weight_return": (
-                        raw_mean if spec.return_basis == "raw" else residual_mean
+                        residual_mean if use_residualized else raw_mean
                     ),
                     "equal_weight_raw_return": raw_mean,
                     "equal_weight_residualized_return": residual_mean,
@@ -786,6 +819,9 @@ def _quality_summary(
     structurally_available = int(label_coverage["structurally_available_rows"].sum())
     matched = int(label_coverage["matched_rows"].sum())
     label_match_rate = matched / structurally_available if structurally_available else 0.0
+    residualization_failures = int(
+        (ic_series["residualization_status"] != "ok").sum()
+    )
     hard_failures = {
         "failed_cross_section_dates": int((coverage["status"] != "ok").sum()),
         "coverage_below_threshold_dates": int(
@@ -807,14 +843,17 @@ def _quality_summary(
         "top_bottom_industry_active_weight_breach_rows": int(
             (
                 portfolio_industry["exposure_value"].abs()
-                > spec.max_top_bottom_industry_active_weight + 1e-12
+                > portfolio_industry["exposure_limit"] + 1e-12
             ).sum()
         ),
         "top_bottom_log_market_cap_z_breach_rows": int(
             (
                 portfolio_size["exposure_value"].abs()
-                > spec.max_top_bottom_log_market_cap_z + 1e-12
+                > portfolio_size["exposure_limit"] + 1e-12
             ).sum()
+        ),
+        "requested_residualized_return_failure_periods": (
+            residualization_failures if spec.return_basis == "residualized" else 0
         ),
     }
     return {
@@ -830,11 +869,18 @@ def _quality_summary(
         "unexpected_missing_label_rows": int(
             label_coverage["unexpected_missing_rows"].sum()
         ),
+        "residualization_failure_periods": residualization_failures,
         "maximum_top_bottom_industry_active_weight": float(
             portfolio_industry["exposure_value"].abs().max()
         ),
         "maximum_top_bottom_log_market_cap_z": float(
             portfolio_size["exposure_value"].abs().max()
+        ),
+        "maximum_top_bottom_industry_sampling_sigma": float(
+            portfolio_industry["standardized_exposure"].max()
+        ),
+        "maximum_top_bottom_size_sampling_sigma": float(
+            portfolio_size["standardized_exposure"].max()
         ),
         "decision_frequency": frequency,
         "hard_failures": hard_failures,
@@ -883,6 +929,7 @@ def _exposure_records(
     decision_at: pd.Timestamp,
     frame: pd.DataFrame,
     weights: np.ndarray,
+    spec: FactorEvaluationSpec,
 ) -> list[Dict[str, Any]]:
     rows: list[Dict[str, Any]] = []
     score = frame["signal_score"].to_numpy(dtype=float)
@@ -904,6 +951,9 @@ def _exposure_records(
                     np.average(score[mask], weights=weights[mask])
                 ),
                 "exposure_value": float(np.average(score[mask], weights=weights[mask])),
+                "sampling_standard_error": 0.0,
+                "exposure_limit": 1e-8,
+                "standardized_exposure": np.nan,
             }
         )
     rows.append(
@@ -917,6 +967,9 @@ def _exposure_records(
             "benchmark_value": 0.0,
             "portfolio_value": _weighted_correlation(score, log_cap, weights),
             "exposure_value": _weighted_correlation(score, log_cap, weights),
+            "sampling_standard_error": 0.0,
+            "exposure_limit": 1e-8,
+            "standardized_exposure": np.nan,
         }
     )
     benchmark_industry = pd.Series(original_industry).value_counts(normalize=True)
@@ -926,6 +979,14 @@ def _exposure_records(
         for name in sorted(set(benchmark_industry.index) | set(portfolio_industry.index)):
             benchmark = float(benchmark_industry.get(name, 0.0))
             portfolio = float(portfolio_industry.get(name, 0.0))
+            active = portfolio - benchmark
+            standard_error = math.sqrt(
+                benchmark * (1.0 - benchmark) / len(group)
+            )
+            exposure_limit = max(
+                spec.industry_active_weight_floor,
+                spec.exposure_sampling_sigma_multiplier * standard_error,
+            )
             rows.append(
                 {
                     "decision_at": decision_at,
@@ -936,10 +997,23 @@ def _exposure_records(
                     "observations": len(group),
                     "benchmark_value": benchmark,
                     "portfolio_value": portfolio,
-                    "exposure_value": portfolio - benchmark,
+                    "exposure_value": active,
+                    "sampling_standard_error": standard_error,
+                    "exposure_limit": exposure_limit,
+                    "standardized_exposure": (
+                        abs(active) / standard_error if standard_error > 0 else np.nan
+                    ),
                 }
             )
         portfolio_size = float(group["log_market_cap_z"].mean())
+        size_active = portfolio_size - benchmark_size
+        size_standard_error = float(frame["log_market_cap_z"].std(ddof=0)) / math.sqrt(
+            len(group)
+        )
+        size_limit = max(
+            spec.log_market_cap_z_floor,
+            spec.exposure_sampling_sigma_multiplier * size_standard_error,
+        )
         rows.append(
             {
                 "decision_at": decision_at,
@@ -950,7 +1024,14 @@ def _exposure_records(
                 "observations": len(group),
                 "benchmark_value": benchmark_size,
                 "portfolio_value": portfolio_size,
-                "exposure_value": portfolio_size - benchmark_size,
+                "exposure_value": size_active,
+                "sampling_standard_error": size_standard_error,
+                "exposure_limit": size_limit,
+                "standardized_exposure": (
+                    abs(size_active) / size_standard_error
+                    if size_standard_error > 0
+                    else np.nan
+                ),
             }
         )
     return rows

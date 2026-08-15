@@ -114,7 +114,7 @@ def build_factor_evaluation_artifact(
         }
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p07_single_factor_evaluation_v2",
+        "schema_version": "p07_single_factor_evaluation_v3",
         "identity": identity,
         "factor_spec": {**asdict(frozen), "sha256": frozen.fingerprint},
         "inputs": {
@@ -133,6 +133,7 @@ def build_factor_evaluation_artifact(
             "industry_and_log_size_neutralization": True,
             "first_order_conditions_are_numerical_sanity_checks_only": True,
             "top_bottom_portfolio_exposure_limits": True,
+            "sampling_noise_aware_portfolio_exposure_limits": True,
             "structural_label_tail_excluded_by_horizon": True,
             "decision_frequency_inferred_and_validated": True,
             "horizon_specific_newey_west_lags": True,
@@ -163,7 +164,7 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
     if not manifest_path.exists():
         raise FactorEvaluationError(f"factor manifest not found: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != "p07_single_factor_evaluation_v2":
+    if manifest.get("schema_version") != "p07_single_factor_evaluation_v3":
         raise FactorEvaluationError("report input is not a P0.7 factor artifact")
     for name, metadata in manifest["outputs"].items():
         path = root / metadata["path"]
@@ -217,6 +218,10 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         f"- 推断每次决策间隔交易日：{quality['decision_frequency']['trading_sessions_per_period']:.0f}",
         f"- Top/Bottom 最大行业主动权重：{_pct(quality['maximum_top_bottom_industry_active_weight'])}",
         f"- Top/Bottom 最大对数市值标准分偏离：{_number(quality['maximum_top_bottom_log_market_cap_z'])}",
+        f"- Top/Bottom 最大行业抽样标准误倍数：{_number(quality['maximum_top_bottom_industry_sampling_sigma'])}",
+        f"- Top/Bottom 最大市值抽样标准误倍数：{_number(quality['maximum_top_bottom_size_sampling_sigma'])}",
+        f"- 暴露阈值：行业下限 {_pct(spec['industry_active_weight_floor'])}、市值标准分下限 {_number(spec['log_market_cap_z_floor'])}、抽样误差 {spec['exposure_sampling_sigma_multiplier']:.1f}σ",
+        f"- 收益残差化失败期：{quality['residualization_failure_periods']}",
         "",
         "## 分持有期标签覆盖",
         "",
@@ -290,6 +295,8 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
             "- IC、分层差和 Newey-West t 值是研究诊断，不是可成交收益承诺。",
             f"- 主表使用 `{spec['return_basis']}` 收益口径；产物同时保存原始收益和行业/市值残差收益诊断，禁止跨口径直接比较。",
             "- 全截面回归一阶条件仅作为线性代数 sanity check；真正的风格门禁作用于 Top/Bottom 组合的行业主动权重和市值标准分偏离。",
+            "- Top/Bottom 暴露阈值取固定下限与抽样标准误倍数的较大值，避免小股票池中的自然抽样波动被误判为风格下注。",
+            "- 收益残差化失败时保留 raw 口径和失败诊断；若正式主口径配置为 residualized，则该期回退会阻止晋级。",
             "- 分层多空差仅用于辨别因子排序能力；A 股现金多头的可实现表现必须把 `target_weights.parquet` 送入 P0.6.3 执行回测。",
             "- P0.7 不以 IC 正负作为数据质量门禁，负面结果必须和正面结果一样保留。",
             "- 多因子合成、正交化顺序选择和组合优化不属于本产物。",

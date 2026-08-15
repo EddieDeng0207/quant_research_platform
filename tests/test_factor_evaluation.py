@@ -113,7 +113,7 @@ def test_quantile_portfolio_exposure_gate_catches_tail_concentration():
     industry_number = security_number % 6
     small = (security_number % 7) < 2
     within_industry = (security_number // 6) % 40 - 19.5
-    scale = np.where(industry_number == 5, 4.0, 1.0) * np.where(small, 2.0, 1.0)
+    scale = np.where(industry_number == 5, 50.0, 1.0) * np.where(small, 20.0, 1.0)
     observations["industry_code"] = "I" + industry_number.astype(str)
     observations["market_cap"] = np.where(small, 3e8, 3e9).astype(float)
     observations["factor_value"] = within_industry * scale
@@ -133,6 +133,79 @@ def test_quantile_portfolio_exposure_gate_catches_tail_concentration():
     assert failures["top_bottom_log_market_cap_z_breach_rows"] > 0
     assert failures["neutralization_first_order_industry_sanity_breach_rows"] == 0
     assert failures["neutralization_first_order_size_sanity_breach_rows"] == 0
+
+
+def test_noise_aware_exposure_threshold_accepts_small_universe_random_factor():
+    observations, labels = _factor_inputs(periods=10, securities=250)
+    security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)
+    observations["industry_code"] = "I" + (security_number % 8).astype(str)
+    observations["factor_value"] = np.random.default_rng(20260815).normal(
+        size=len(observations)
+    )
+    spec = FactorEvaluationSpec(
+        factor_name="independent_random",
+        factor_family="fundamental",
+        min_cross_section=200,
+        min_ic_observations=100,
+        min_evaluation_periods=2,
+    )
+
+    result = evaluate_single_factor(observations, labels, spec)
+
+    assert result.quality["hard_failures"][
+        "top_bottom_industry_active_weight_breach_rows"
+    ] == 0
+    assert result.quality["hard_failures"][
+        "top_bottom_log_market_cap_z_breach_rows"
+    ] == 0
+    portfolio_exposures = result.factor_exposures.loc[
+        result.factor_exposures["scope"] == "quantile_portfolio"
+    ]
+    assert (
+        portfolio_exposures["exposure_limit"]
+        >= np.where(
+            portfolio_exposures["exposure_type"] == "industry_active_weight",
+            spec.industry_active_weight_floor,
+            spec.log_market_cap_z_floor,
+        )
+    ).all()
+
+
+def test_return_residualization_failure_falls_back_to_raw_with_diagnostics():
+    observations, labels = _factor_inputs(periods=3, securities=200)
+    security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)
+    observations["industry_code"] = "I" + (security_number % 4).astype(str)
+    observations["market_cap"] = np.where(
+        security_number < 100,
+        1e9,
+        1e9 + security_number * 1e7,
+    )
+    observations["factor_value"] = np.random.default_rng(17).normal(
+        size=len(observations)
+    )
+    missing = labels["instrument_id"].str.removeprefix("CN").astype(int) >= 100
+    labels.loc[missing, "forward_return"] = np.nan
+    spec = FactorEvaluationSpec(
+        factor_name="residualization_fallback",
+        factor_family="fundamental",
+        min_cross_section=200,
+        min_ic_observations=100,
+        min_evaluation_periods=2,
+        minimum_label_match_rate=0.40,
+        return_basis="residualized",
+    )
+
+    result = evaluate_single_factor(observations, labels, spec)
+
+    assert (result.ic_series["return_basis"] == "raw_fallback").all()
+    assert result.ic_series["residualization_error"].str.contains(
+        "constant|rank deficient"
+    ).all()
+    assert result.quality["residualization_failure_periods"] == len(result.ic_series)
+    assert result.quality["hard_failures"][
+        "requested_residualized_return_failure_periods"
+    ] == len(result.ic_series)
+    assert not result.quality["promotion_passed"]
 
 
 def test_label_coverage_excludes_structural_tail_by_horizon():
@@ -258,7 +331,7 @@ def test_factor_artifact_is_deterministic_and_report_verifies_hashes(tmp_path: P
     )
     assert first == second
     manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "p07_single_factor_evaluation_v2"
+    assert manifest["schema_version"] == "p07_single_factor_evaluation_v3"
     assert manifest["quality"]["promotion_passed"]
     assert "label_coverage" in manifest["outputs"]
     report = generate_factor_evaluation_report(first, tmp_path / "report.md")

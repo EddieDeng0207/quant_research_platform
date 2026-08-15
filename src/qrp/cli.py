@@ -365,12 +365,9 @@ def _build_parser() -> argparse.ArgumentParser:
     factor.add_argument(
         "--return-basis", choices=("raw", "residualized"), default="raw"
     )
-    factor.add_argument(
-        "--max-top-bottom-industry-active-weight", type=float, default=0.05
-    )
-    factor.add_argument(
-        "--max-top-bottom-log-market-cap-z", type=float, default=0.25
-    )
+    factor.add_argument("--industry-active-weight-floor", type=float, default=0.05)
+    factor.add_argument("--log-market-cap-z-floor", type=float, default=0.25)
+    factor.add_argument("--exposure-sampling-sigma-multiplier", type=float, default=4.0)
     factor.add_argument("--output-root", default="data/curated")
     factor.add_argument("--allow-failed-promotion", action="store_true")
     factor.add_argument(
@@ -566,11 +563,10 @@ def main(argv: List[str] = None) -> int:
                 ),
                 minimum_newey_west_lags=args.minimum_newey_west_lags,
                 return_basis=args.return_basis,
-                max_top_bottom_industry_active_weight=(
-                    args.max_top_bottom_industry_active_weight
-                ),
-                max_top_bottom_log_market_cap_z=(
-                    args.max_top_bottom_log_market_cap_z
+                industry_active_weight_floor=args.industry_active_weight_floor,
+                log_market_cap_z_floor=args.log_market_cap_z_floor,
+                exposure_sampling_sigma_multiplier=(
+                    args.exposure_sampling_sigma_multiplier
                 ),
             ),
             require_clean_git=not args.allow_dirty_code,

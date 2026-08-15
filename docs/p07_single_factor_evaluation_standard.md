@@ -121,9 +121,22 @@ size_active_z(q)
   = mean_q(z(log_market_cap)) - mean_universe(z(log_market_cap))
 ```
 
-门禁作用于 Top 和 Bottom 组，默认单行业主动权重绝对值不超过 5 个百分点，
-对数市值标准分偏离绝对值不超过 0.25。Top 组是送入 P0.6.3 的实际目标组合，
-因此不能用全截面均值正交替代组合暴露审计。
+固定阈值会随股票池规模产生不同的抽样显著性，因此门禁使用噪声感知阈值：
+
+```text
+industry_se(q, j) = sqrt(p_j * (1 - p_j) / n_q)
+industry_limit(q, j) = max(5%, 4 * industry_se(q, j))
+
+size_se(q) = std_universe(z(log_market_cap)) / sqrt(n_q)
+size_limit(q) = max(0.25, 4 * size_se(q))
+```
+
+其中 `p_j` 是全样本行业权重，`n_q` 是该 quantile 的证券数。默认使用 4 倍
+抽样标准误；大股票池由固定下限约束，小股票池按自然抽样噪声放宽。每行同时
+保存 `sampling_standard_error`、`exposure_limit` 和
+`standardized_exposure`，避免把“样本小”和“真实风格下注”混成同一件事。
+Top 组是送入 P0.6.3 的实际目标组合，因此不能用全截面均值正交替代组合
+暴露审计。
 
 ## 评测方法
 
@@ -149,6 +162,14 @@ size_active_z(q)
 同时对未来收益使用相同的行业/市值 WLS 残差化，并保存原始收益和残差收益的
 IC、Rank IC、分层差。`return_basis` 可冻结为 `raw` 或 `residualized`，主表只
 展示选定口径，禁止跨口径直接比较。
+
+收益残差化按 `(decision_at, horizon_sessions)` 执行一次 WLS。若该标签截面因
+缺失导致设计矩阵秩不足，系统保留原始收益评测，记录
+`residualization_status`、`residualization_error` 并把当期口径标为
+`raw_fallback`。主口径为 `raw` 时这只是诊断缺失；主口径明确要求
+`residualized` 时，任何回退都会阻止晋级。500 周、3 个持有期对应约 1500 次
+收益回归，首次全市场运行前需要记录墙钟时间和峰值内存，再决定是否缓存同一
+决策日的加权投影矩阵。
 
 P0.7 不以 IC、t 值或分层差是否为正作为工程晋级门禁。这样可以保证负面研究
 结果不会因“没有 alpha”被删除。多因子批量比较时再使用实验登记中的
@@ -181,8 +202,9 @@ Benjamini-Hochberg FDR 控制。
 - 任一持有期少于默认 104 个有效周频评测期；
 - 任一期缺少最高或最低分组；
 - WLS 一阶条件 sanity check 超过 `1e-8`；
-- Top/Bottom 任一行业主动权重超过默认 5 个百分点；
-- Top/Bottom 对数市值标准分偏离超过默认 0.25；
+- Top/Bottom 任一行业主动权重超过 `max(5%, 4 * sampling_se)`；
+- Top/Bottom 对数市值标准分偏离超过 `max(0.25, 4 * sampling_se)`；
+- 主收益口径要求残差收益但当期收益残差化失败；
 - 实际决策频率与冻结年化频率不一致；
 - 稀疏行业合并后仍不足最低成员数。
 
