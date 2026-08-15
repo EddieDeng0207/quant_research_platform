@@ -89,8 +89,19 @@ def archive_committed_source(
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         raise VersionControlError(f"source archive already exists: {target}")
+    resolved_commit = _git(
+        root,
+        "rev-parse",
+        f"{commit}^{{commit}}",
+    ).stdout.strip()
     result = subprocess.run(
-        ["git", "archive", "--format=tar", f"--output={target}", commit],
+        [
+            "git",
+            "archive",
+            "--format=tar",
+            f"--output={target}",
+            resolved_commit,
+        ],
         cwd=root,
         check=False,
         capture_output=True,
@@ -100,7 +111,7 @@ def archive_committed_source(
         raise VersionControlError(result.stderr.strip() or "git archive failed")
     return {
         "path": str(target),
-        "commit": _git(root, "rev-parse", commit).stdout.strip(),
+        "commit": resolved_commit,
         "sha256": _sha256(target),
         "bytes": target.stat().st_size,
     }
