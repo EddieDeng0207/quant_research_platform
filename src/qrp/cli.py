@@ -33,6 +33,11 @@ from .execution import (
     build_lagged_capacity_panel,
     generate_target_weight_orders,
 )
+from .research import (
+    FactorEvaluationSpec,
+    build_factor_evaluation_artifact,
+    generate_factor_evaluation_report,
+)
 
 
 def _write_results(results: Iterable[FetchResult], data_root: str) -> None:
@@ -321,6 +326,53 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest_report.add_argument("--artifact", required=True)
     backtest_report.add_argument("--output", required=True)
+
+    factor = subparsers.add_parser(
+        "build-factor-evaluation",
+        help="build a PIT-safe, neutralized P0.7 single-factor evaluation artifact",
+    )
+    factor.add_argument("--observations", required=True)
+    factor.add_argument("--forward-returns", required=True)
+    factor.add_argument("--factor-name", required=True)
+    factor.add_argument(
+        "--factor-family",
+        choices=(
+            "fundamental",
+            "analyst_expectation",
+            "alternative",
+            "price_volume_close",
+        ),
+        required=True,
+    )
+    factor.add_argument("--expected-direction", type=int, choices=(-1, 1), default=1)
+    factor.add_argument("--quantiles", type=int, default=5)
+    factor.add_argument("--winsor-mad-multiplier", type=float, default=5.0)
+    factor.add_argument("--min-cross-section", type=int, default=20)
+    factor.add_argument("--min-ic-observations", type=int, default=20)
+    factor.add_argument("--min-evaluation-periods", type=int, default=26)
+    factor.add_argument("--minimum-coverage", type=float, default=0.80)
+    factor.add_argument("--minimum-label-match-rate", type=float, default=0.95)
+    factor.add_argument(
+        "--neutralization-weighting",
+        choices=("equal", "sqrt_market_cap"),
+        default="sqrt_market_cap",
+    )
+    factor.add_argument("--target-gross-weight", type=float, default=0.98)
+    factor.add_argument("--annualization-periods", type=int, default=52)
+    factor.add_argument("--newey-west-lags", type=int, default=4)
+    factor.add_argument("--output-root", default="data/curated")
+    factor.add_argument("--allow-failed-promotion", action="store_true")
+    factor.add_argument(
+        "--allow-dirty-code",
+        action="store_true",
+        help="allow exploratory output without a clean committed Git identity",
+    )
+
+    factor_report = subparsers.add_parser(
+        "report-factor", help="generate a verified Markdown report from a P0.7 artifact"
+    )
+    factor_report.add_argument("--artifact", required=True)
+    factor_report.add_argument("--output", required=True)
     return parser
 
 
@@ -477,6 +529,38 @@ def main(argv: List[str] = None) -> int:
     if args.command == "report-backtest":
         output = generate_backtest_report(Path(args.artifact), Path(args.output))
         print(f"built P0.6.3 report -> {output}")
+        return 0
+    if args.command == "build-factor-evaluation":
+        output = build_factor_evaluation_artifact(
+            Path(args.observations),
+            Path(args.forward_returns),
+            Path(args.output_root),
+            spec=FactorEvaluationSpec(
+                factor_name=args.factor_name,
+                factor_family=args.factor_family,
+                expected_direction=args.expected_direction,
+                quantiles=args.quantiles,
+                winsor_mad_multiplier=args.winsor_mad_multiplier,
+                min_cross_section=args.min_cross_section,
+                min_ic_observations=args.min_ic_observations,
+                min_evaluation_periods=args.min_evaluation_periods,
+                minimum_coverage=args.minimum_coverage,
+                minimum_label_match_rate=args.minimum_label_match_rate,
+                neutralization_weighting=args.neutralization_weighting,
+                target_gross_weight=args.target_gross_weight,
+                annualization_periods=args.annualization_periods,
+                newey_west_lags=args.newey_west_lags,
+            ),
+            require_clean_git=not args.allow_dirty_code,
+            strict=not args.allow_failed_promotion,
+        )
+        print(f"built P0.7 factor evaluation artifact -> {output}")
+        return 0
+    if args.command == "report-factor":
+        output = generate_factor_evaluation_report(
+            Path(args.artifact), Path(args.output)
+        )
+        print(f"built P0.7 factor report -> {output}")
         return 0
     try:
         if args.command in {"backfill-p0", "backfill-p05"}:

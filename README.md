@@ -229,6 +229,13 @@ data/lake/
 
 `manifest.jsonl` 保存请求参数（密钥除外）、行数、字段、转换说明和文件 SHA-256。后续 curated 层只能引用 raw 文件及其哈希，不能覆盖原始快照。
 
+## P0.7 单因子研究
+
+P0.7 已提供时点严格的单因子评测底座：因子观测与未来收益标签物理分表，
+逐决策日完成 MAD 缩尾、行业/对数市值中性化、IC/Rank IC、分层、衰减、
+换手和年度稳定性评测，并输出可交给 P0.6.3 的多头目标权重。完整标准见
+`docs/p07_single_factor_evaluation_standard.md`。
+
 ## 当前边界
 
 - manifest 已增加进程级文件锁；同一 checkpoint 当前仍只允许一个编排进程写入。未来并行 Agent 共享任务状态前，需要增加 checkpoint 锁或迁移到事务型任务存储。
