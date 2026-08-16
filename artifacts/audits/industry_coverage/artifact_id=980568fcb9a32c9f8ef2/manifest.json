@@ -1,0 +1,188 @@
+{
+  "artifact_id": "980568fcb9a32c9f8ef2",
+  "guardrails": {
+    "artifact_hashes_verified": true,
+    "conservative_coverage_is_diagnostic_not_promotion_gate": true,
+    "effective_industry_intervals_used": true,
+    "not_substituted_for_formal_factor_panel_coverage": true,
+    "point_in_time_financial_availability_used": true,
+    "shared_cn_equity_namespace_required": true
+  },
+  "identity": {
+    "calendar_sha256": "faa71dbc90986137e76261bb920c946411408aa6a78462070f0304e0bd6bff27",
+    "diagnostic_scope": "pit_known_financial_universe_vs_effective_industry_intervals",
+    "end_date": "2026-08-14",
+    "environment_lock_sha256": "836882d0d8a77242a92e29a1cd2f19ede916e2fb44f30ff4f52eeb59f67b2fb0",
+    "fundamental_artifact_id": "66339800e8f9316a4486",
+    "fundamental_output_sha256": "41c2342784528b7479d15241bcdc693dd678a333c37236c5ae3a65ff84dfbd78",
+    "git_commit": "dfd951541086e4f8497ddd1d7799916d286b4c77",
+    "git_tree": "cb23a70fbdb8670e740a4b202cfd447891108041",
+    "implementation_sha256": "161dc4c14bc330a1af65751e5ac02086389e2ebcd6534516ea7d948f94a11257",
+    "industry_artifact_id": "5e5a922760de641e4f50",
+    "industry_output_sha256": "59dc429cd04510e9e1c8e1fdbdacb971857c2f25640f23a3a6693293e0c2797d",
+    "minimum_coverage": 0.8,
+    "schema_version": "p08_industry_financial_coverage_v1",
+    "start_date": "2016-01-01"
+  },
+  "inputs": {
+    "calendar": "/Users/eddiedeng/Desktop/发财与研究/quant_research_platform/data/lake/raw/provider=tushare/dataset=trading_calendar/ingest_date=2026-08-16/part-025419-18688a5d056f.parquet",
+    "fundamental_artifact": "/Users/eddiedeng/Desktop/发财与研究/quant_research_platform/data/curated/fundamentals/artifact_id=66339800e8f9316a4486",
+    "industry_artifact": "/Users/eddiedeng/Desktop/发财与研究/quant_research_platform/data/curated/industry/artifact_id=5e5a922760de641e4f50"
+  },
+  "outputs": {
+    "daily_coverage": {
+      "path": "daily_coverage.parquet",
+      "rows": 2579,
+      "sha256": "64d15cddcc48c07f1aa6598a8299882e8e07d7dab1d72a482568f0ca19b9a41e"
+    }
+  },
+  "quality": {
+    "hard_failures": {
+      "invalid_fundamental_namespace_rows": 0,
+      "invalid_industry_namespace_rows": 0
+    },
+    "promotion_passed": true
+  },
+  "schema_version": "p08_industry_financial_coverage_v1",
+  "summary": {
+    "conservative_stress_test_passed": false,
+    "daily_fundamental_to_industry_coverage": {
+      "maximum": 0.7853194103194103,
+      "median": 0.6736892506583673,
+      "minimum": 0.6005902606984752,
+      "p01": 0.6273886252717723,
+      "p05": 0.6369360954566367
+    },
+    "daily_industry_to_fundamental_coverage": {
+      "maximum": 1.0,
+      "median": 1.0,
+      "minimum": 1.0,
+      "p01": 1.0,
+      "p05": 1.0
+    },
+    "formal_p07_factor_panel_coverage": "not_measured",
+    "interpretation": "This is a conservative pre-factor identity diagnostic. The actual P0.7 coverage denominator must be recomputed from each dated eligible factor panel.",
+    "lowest_coverage_sessions": [
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 6099,
+        "financial_without_active_industry": 2436,
+        "fundamental_to_industry_coverage": 0.6005902606984752,
+        "industry_active_instruments": 3663,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3663,
+        "trade_date": "2021-12-10 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 5044,
+        "financial_without_active_industry": 1911,
+        "fundamental_to_industry_coverage": 0.6211340206185567,
+        "industry_active_instruments": 3133,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3133,
+        "trade_date": "2017-06-30 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4835,
+        "financial_without_active_industry": 1817,
+        "fundamental_to_industry_coverage": 0.6241985522233713,
+        "industry_active_instruments": 3018,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3018,
+        "trade_date": "2017-01-03 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4836,
+        "financial_without_active_industry": 1817,
+        "fundamental_to_industry_coverage": 0.6242762613730356,
+        "industry_active_instruments": 3019,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3019,
+        "trade_date": "2017-01-04 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4837,
+        "financial_without_active_industry": 1813,
+        "fundamental_to_industry_coverage": 0.6251808972503617,
+        "industry_active_instruments": 3024,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3024,
+        "trade_date": "2017-01-05 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4842,
+        "financial_without_active_industry": 1813,
+        "fundamental_to_industry_coverage": 0.6255679471292854,
+        "industry_active_instruments": 3029,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3029,
+        "trade_date": "2017-01-09 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4859,
+        "financial_without_active_industry": 1819,
+        "fundamental_to_industry_coverage": 0.6256431364478288,
+        "industry_active_instruments": 3040,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3040,
+        "trade_date": "2017-01-16 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4837,
+        "financial_without_active_industry": 1810,
+        "fundamental_to_industry_coverage": 0.6258011163944593,
+        "industry_active_instruments": 3027,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3027,
+        "trade_date": "2017-01-06 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4843,
+        "financial_without_active_industry": 1812,
+        "fundamental_to_industry_coverage": 0.6258517447862895,
+        "industry_active_instruments": 3031,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3031,
+        "trade_date": "2017-01-10 00:00:00"
+      },
+      {
+        "active_industry_without_financial": 0,
+        "below_minimum_coverage": true,
+        "financial_known_instruments": 4845,
+        "financial_without_active_industry": 1812,
+        "fundamental_to_industry_coverage": 0.6260061919504644,
+        "industry_active_instruments": 3033,
+        "industry_to_fundamental_coverage": 1.0,
+        "matched_instruments": 3033,
+        "trade_date": "2017-01-11 00:00:00"
+      }
+    ],
+    "open_sessions": 2579,
+    "sessions_below_minimum_coverage": 2579,
+    "static_identity_counts": {
+      "fundamental_instruments": 6722,
+      "fundamental_only_instruments": 1276,
+      "industry_instruments": 5446,
+      "industry_only_instruments": 0,
+      "shared_instruments": 5446,
+      "static_fundamental_to_industry_coverage": 0.8101755429931567
+    }
+  }
+}
