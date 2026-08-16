@@ -51,6 +51,10 @@ decision_at <= research_as_of_at
 2014年起的季度作为2016年因子研究的两年 warm-up。分页达到上限、分页重复或任务缺失
 都 fail closed。普通权限和小样本试跑仍保留按股票模式。
 
+VIP 全市场响应中的非六位可交易证券标识在 raw 层保留为 `vendor_nonstandard`，不得猜测
+映射；curated 层排除并统计。报告期存在但公告/实际公告日期同时缺失的记录同样保留在
+raw，并设置 `pit_eligible=false`，不得伪造知识时间。报告期缺失仍属于硬契约失败。
+
 默认报表族：
 
 - `income`；

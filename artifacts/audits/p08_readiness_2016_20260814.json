@@ -1,0 +1,173 @@
+{
+  "datasets": {
+    "adjustment_factors": {
+      "complete": true,
+      "covered_partitions": 2579,
+      "expected_partitions": 2579,
+      "first_partition": "2016-01-04",
+      "last_partition": "2026-08-14",
+      "latest_rows": 11452310,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 15
+    },
+    "daily_bars": {
+      "complete": false,
+      "covered_partitions": 246,
+      "expected_partitions": 2579,
+      "first_partition": "2023-01-03",
+      "last_partition": "2024-01-05",
+      "latest_rows": 1280055,
+      "missing_partitions": 2333,
+      "missing_sample": [
+        "2016-01-04",
+        "2016-01-05",
+        "2016-01-06",
+        "2016-01-07",
+        "2016-01-08",
+        "2016-01-11",
+        "2016-01-12",
+        "2016-01-13",
+        "2016-01-14",
+        "2016-01-15"
+      ],
+      "superseded_snapshots": 8
+    },
+    "daily_indicators": {
+      "complete": true,
+      "covered_partitions": 2579,
+      "expected_partitions": 2579,
+      "first_partition": "2016-01-04",
+      "last_partition": "2026-08-14",
+      "latest_rows": 10954268,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 16
+    },
+    "daily_limits": {
+      "complete": false,
+      "covered_partitions": 246,
+      "expected_partitions": 2579,
+      "first_partition": "2023-01-03",
+      "last_partition": "2024-01-05",
+      "latest_rows": 1603943,
+      "missing_partitions": 2333,
+      "missing_sample": [
+        "2016-01-04",
+        "2016-01-05",
+        "2016-01-06",
+        "2016-01-07",
+        "2016-01-08",
+        "2016-01-11",
+        "2016-01-12",
+        "2016-01-13",
+        "2016-01-14",
+        "2016-01-15"
+      ],
+      "superseded_snapshots": 4
+    },
+    "daily_suspensions": {
+      "complete": false,
+      "covered_partitions": 246,
+      "expected_partitions": 2579,
+      "first_partition": "2023-01-03",
+      "last_partition": "2024-01-05",
+      "latest_rows": 12160,
+      "missing_partitions": 2333,
+      "missing_sample": [
+        "2016-01-04",
+        "2016-01-05",
+        "2016-01-06",
+        "2016-01-07",
+        "2016-01-08",
+        "2016-01-11",
+        "2016-01-12",
+        "2016-01-13",
+        "2016-01-14",
+        "2016-01-15"
+      ],
+      "superseded_snapshots": 4
+    },
+    "historical_instruments": {
+      "complete": false,
+      "covered_partitions": 246,
+      "expected_partitions": 2579,
+      "first_partition": "2023-01-03",
+      "last_partition": "2024-01-05",
+      "latest_rows": 1269990,
+      "missing_partitions": 2333,
+      "missing_sample": [
+        "2016-01-04",
+        "2016-01-05",
+        "2016-01-06",
+        "2016-01-07",
+        "2016-01-08",
+        "2016-01-11",
+        "2016-01-12",
+        "2016-01-13",
+        "2016-01-14",
+        "2016-01-15"
+      ],
+      "superseded_snapshots": 4
+    },
+    "stock_status": {
+      "complete": false,
+      "covered_partitions": 246,
+      "expected_partitions": 2579,
+      "first_partition": "2023-01-03",
+      "last_partition": "2024-01-05",
+      "latest_rows": 32085,
+      "missing_partitions": 2333,
+      "missing_sample": [
+        "2016-01-04",
+        "2016-01-05",
+        "2016-01-06",
+        "2016-01-07",
+        "2016-01-08",
+        "2016-01-11",
+        "2016-01-12",
+        "2016-01-13",
+        "2016-01-14",
+        "2016-01-15"
+      ],
+      "superseded_snapshots": 4
+    }
+  },
+  "end_date": "2026-08-14",
+  "estimated_weekly_periods": 542,
+  "expected_open_sessions": 2579,
+  "fundamentals": {
+    "artifact_id": "66339800e8f9316a4486",
+    "minimum_symbols": 200,
+    "missing_statements": [],
+    "output_hash_failures": [],
+    "promotion_passed": true,
+    "ready": true,
+    "research_as_of_at": "2026-08-16T02:53:07.786612+00:00",
+    "schema_version": "p08_fundamental_pit_v1",
+    "symbols": 6723
+  },
+  "hard_failures": {
+    "fundamental_artifact_missing_or_failed": 0,
+    "historical_industry_membership_missing_or_failed": 0,
+    "insufficient_weekly_periods": 0,
+    "missing_daily_partitions": 11665
+  },
+  "industry_membership": {
+    "artifact_hash_valid": true,
+    "artifact_promoted": true,
+    "covered_end": "2026-08-14",
+    "covered_start": "2016-01-01",
+    "instruments": 5447,
+    "minimum_instruments": 200,
+    "overlapping_intervals": 0,
+    "path": "data/curated/industry/artifact_id=43e6a195e46f7eb1aa6c/membership.parquet",
+    "ready": true,
+    "rows": 10688,
+    "sha256": "1efff5347e4c60fdf429bb08b70137b3fa743af532eeca97f729c05003513545",
+    "temporal_contract": "effective_interval"
+  },
+  "minimum_weekly_periods": 104,
+  "passed": false,
+  "start_date": "2016-01-04"
+}
