@@ -255,6 +255,20 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(member["source_membership_start"], pd.Timestamp("1991-04-03"))
         self.assertTrue(pd.isna(member["source_membership_end"]))
 
+    def test_historical_industry_preserves_legacy_instrument_identity(self):
+        class LegacyIndustryClient(FakeTushareClient):
+            @staticmethod
+            def index_member(**kwargs):
+                frame = FakeTushareClient.index_member(**kwargs)
+                frame["con_code"] = "T00018.SH"
+                return frame
+
+        provider = TushareProvider(client=LegacyIndustryClient())
+        member = provider.fetch_industry_members(
+            "SW2014", "801780.SI", "480000", "银行"
+        ).frame.iloc[0]
+        self.assertEqual(member["symbol"], "T00018.SH")
+
     def test_stock_status_contract(self):
         row = self.provider.fetch_stock_status_by_date("2024-01-02").frame.iloc[0]
         self.assertEqual(row["status_type"], "ST")

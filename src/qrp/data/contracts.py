@@ -19,7 +19,7 @@ class DataContractError(ValueError):
 
 _CN_SYMBOL = re.compile(r"^(?P<code>\d{6})(?:\.(?P<exchange>SH|SZ|BJ))?$", re.I)
 _CN_INSTRUMENT_SYMBOL = re.compile(
-    r"^(?P<legacy>T?)(?P<code>\d{6})(?:\.(?P<exchange>SH|SZ|BJ))?$", re.I
+    r"^(?P<legacy>T?)(?P<code>\d{5,6})(?:\.(?P<exchange>SH|SZ|BJ))?$", re.I
 )
 
 
@@ -54,6 +54,12 @@ def normalize_cn_instrument_symbol(symbol: str) -> str:
         raise DataContractError(f"Invalid mainland China instrument symbol: {symbol!r}")
     code = match.group("code")
     legacy = match.group("legacy").upper()
+    if len(code) != 6 and not legacy:
+        raise DataContractError(f"Invalid mainland China instrument symbol: {symbol!r}")
+    if len(code) != 6 and not match.group("exchange"):
+        raise DataContractError(
+            f"Legacy short instrument identifiers require an exchange: {symbol!r}"
+        )
     exchange = match.group("exchange") or infer_cn_exchange(code)
     return f"{legacy}{code}.{exchange}"
 

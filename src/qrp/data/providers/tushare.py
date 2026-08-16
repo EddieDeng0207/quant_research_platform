@@ -275,7 +275,7 @@ class TushareProvider:
                 "out_date": "source_membership_end",
             }
         ).copy()
-        frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
+        frame["symbol"] = frame["symbol"].map(normalize_cn_instrument_symbol)
         frame["source_membership_start"] = _parse_yyyymmdd(
             frame["source_membership_start"]
         )
