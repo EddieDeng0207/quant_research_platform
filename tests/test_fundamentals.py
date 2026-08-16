@@ -1,4 +1,5 @@
 import json
+import warnings
 
 import pandas as pd
 import pytest
@@ -137,4 +138,31 @@ def test_as_of_selection_rejects_ambiguous_same_timestamp_versions():
             frame,
             "2024-04-23T00:00:00Z",
             "2026-08-16T00:00:00Z",
+        )
+
+
+def test_pit_builder_does_not_depend_on_deprecated_all_null_concat(tmp_path):
+    lake = ParquetLake(tmp_path / "lake")
+    run = FundamentalIngestionRunner(
+        provider=_VersionedProvider(),
+        lake=lake,
+        artifact_root=tmp_path / "artifacts",
+        state_root=tmp_path / "state",
+    ).run(
+        FundamentalBackfillConfig(
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+            statements=("balance_sheet",),
+            symbols=("000001.SZ", "600000.SH"),
+        )
+    )
+    calendar = tmp_path / "calendar.parquet"
+    _calendar(calendar)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        build_fundamental_pit_artifact(
+            run,
+            tmp_path / "lake",
+            calendar,
+            tmp_path / "curated",
         )

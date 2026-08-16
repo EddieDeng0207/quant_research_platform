@@ -164,7 +164,7 @@ def build_fundamental_pit_artifact(
     for statement in statements:
         parts = frames_by_statement[statement]
         if parts:
-            frame = pd.concat(parts, ignore_index=True, sort=False)
+            frame = _concat_statement_parts(parts)
             frame = _curate_statement(
                 frame,
                 statement,
@@ -469,6 +469,17 @@ def _curate_statement(
     return result.sort_values(
         ["instrument_id", "report_period", "available_at", "version_id"]
     ).reset_index(drop=True)
+
+
+def _concat_statement_parts(parts: Sequence[pd.DataFrame]) -> pd.DataFrame:
+    """Preserve the union schema without relying on deprecated dtype inference."""
+    columns = list(dict.fromkeys(column for part in parts for column in part.columns))
+    informative = [part.dropna(axis="columns", how="all") for part in parts]
+    combined = pd.concat(informative, ignore_index=True, sort=False)
+    for column in columns:
+        if column not in combined:
+            combined[column] = pd.NA
+    return combined.reindex(columns=columns)
 
 
 def _version_id(row: pd.Series) -> str:
