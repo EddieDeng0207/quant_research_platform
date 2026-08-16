@@ -218,6 +218,21 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(row["symbol"], "X24035.BJ")
         self.assertEqual(row["instrument_kind"], "vendor_nonstandard")
 
+    def test_vip_fundamental_quarantines_missing_announcement_date(self):
+        class MissingAnnouncementClient(FakeTushareClient):
+            @staticmethod
+            def income_vip(**kwargs):
+                frame = FakeTushareClient.income(**kwargs)
+                frame["ann_date"] = None
+                frame["f_ann_date"] = None
+                return frame
+
+        row = TushareProvider(
+            client=MissingAnnouncementClient()
+        ).fetch_fundamentals_by_period("income", "2024-03-31").frame.iloc[0]
+        self.assertFalse(row["pit_eligible"])
+        self.assertEqual(row["pit_exclusion_reason"], "missing_announcement_date")
+
     def test_empty_fundamental_response_is_a_valid_zero_row_snapshot(self):
         class EmptyIncomeClient(FakeTushareClient):
             @staticmethod

@@ -341,12 +341,19 @@ def validate_dataset(dataset: str, frame: pd.DataFrame) -> None:
     if dataset.startswith("fundamentals_"):
         report_period = pd.to_datetime(frame["report_period"], errors="coerce")
         available_date = pd.to_datetime(frame["available_date"], errors="coerce")
-        invalid = available_date.isna() | report_period.isna()
-        if invalid.any():
+        if report_period.isna().any():
             raise DataContractError(
-                f"{dataset} contains rows without report_period or available_date"
+                f"{dataset} contains rows without report_period"
             )
-        if (available_date < report_period).any():
+        if "pit_eligible" in frame:
+            eligible = frame["pit_eligible"].astype(bool)
+        else:
+            eligible = pd.Series(True, index=frame.index)
+        if (eligible & available_date.isna()).any():
+            raise DataContractError(
+                f"{dataset} marks rows without available_date as PIT eligible"
+            )
+        if (eligible & (available_date < report_period)).any():
             raise DataContractError(
                 f"{dataset} contains availability dates before the report period"
             )

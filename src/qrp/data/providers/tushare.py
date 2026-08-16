@@ -119,7 +119,7 @@ class TushareProvider:
                 seen_page_hashes.add(page_hash)
                 frames.append(part)
             if len(part) < page_size:
-                frame = pd.concat(frames, ignore_index=True) if frames else part
+                frame = _concat_provider_pages(frames) if frames else part
                 return frame, {
                     "page_size": page_size,
                     "requests": requests,
@@ -1006,6 +1006,19 @@ class TushareProvider:
         frame["available_date"] = frame["actual_announcement_date"].fillna(
             frame["announcement_date"]
         )
+        frame["pit_eligible"] = frame["report_period"].notna() & frame[
+            "available_date"
+        ].notna()
+        frame["pit_exclusion_reason"] = pd.Series(
+            pd.NA, index=frame.index, dtype="string"
+        )
+        frame.loc[
+            frame["report_period"].notna() & frame["available_date"].isna(),
+            "pit_exclusion_reason",
+        ] = "missing_announcement_date"
+        frame.loc[
+            frame["report_period"].isna(), "pit_exclusion_reason"
+        ] = "missing_report_period"
         frame["statement_type"] = statement
         row_hashes = _source_row_hashes(frame)
         frame["source_row_sha256"] = row_hashes
@@ -1067,3 +1080,10 @@ def _try_normalize_cn_symbol(symbol: Any) -> Optional[str]:
         return normalize_cn_symbol(str(symbol))
     except DataContractError:
         return None
+
+
+def _concat_provider_pages(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
+    """Preserve the union schema without deprecated all-null dtype inference."""
+    columns = list(dict.fromkeys(column for frame in frames for column in frame.columns))
+    informative = [frame.dropna(axis="columns", how="all") for frame in frames]
+    return pd.concat(informative, ignore_index=True, sort=False).reindex(columns=columns)

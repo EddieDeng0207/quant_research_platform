@@ -107,6 +107,7 @@ def build_fundamental_pit_artifact(
     }
     zero_row_tasks = 0
     excluded_nonstandard_financial_rows = 0
+    excluded_missing_knowledge_time_rows = 0
     written_times = []
     for task_id in sorted(expected_tasks):
         raw_path = Path(completed[task_id])
@@ -142,6 +143,10 @@ def build_fundamental_pit_artifact(
                 excluded_nonstandard_financial_rows += int(
                     frame["instrument_kind"].ne("stock").sum()
                 )
+            if "pit_eligible" in frame:
+                excluded_missing_knowledge_time_rows += int(
+                    (~frame["pit_eligible"].astype(bool)).sum()
+                )
             frames_by_statement[statement].append(frame)
         written_times.append(written_at)
         raw_inputs.append(
@@ -161,6 +166,8 @@ def build_fundamental_pit_artifact(
                 eligible = frame
                 if "instrument_kind" in eligible:
                     eligible = eligible.loc[eligible["instrument_kind"].eq("stock")]
+                if "pit_eligible" in eligible:
+                    eligible = eligible.loc[eligible["pit_eligible"].astype(bool)]
                 eligible_symbols.update(eligible["symbol"].dropna().astype(str).unique())
         symbols = tuple(sorted(eligible_symbols))
         if not symbols:
@@ -236,6 +243,7 @@ def build_fundamental_pit_artifact(
             state.get("excluded_legacy_instruments", [])
         ),
         "excluded_nonstandard_financial_rows": excluded_nonstandard_financial_rows,
+        "excluded_missing_knowledge_time_rows": excluded_missing_knowledge_time_rows,
         "statements": statement_quality,
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
@@ -434,6 +442,8 @@ def _curate_statement(
     result = frame.copy()
     if "instrument_kind" in result:
         result = result.loc[result["instrument_kind"].eq("stock")].copy()
+    if "pit_eligible" in result:
+        result = result.loc[result["pit_eligible"].astype(bool)].copy()
     if not result["statement_type"].eq(statement).all():
         raise FundamentalPITError(f"{statement} raw rows contain mixed statement types")
     result["report_period"] = pd.to_datetime(
