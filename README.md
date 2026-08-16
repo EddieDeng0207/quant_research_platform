@@ -103,6 +103,41 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 
 任务按交易日分别拉取全市场未复权行情、复权因子和每日市值指标。每个成功任务立即写入 checkpoint；相同配置再次运行时自动跳过已完成任务。
 
+运行或续跑全市场财务数据任务（正式多年任务前先用 `--symbol` 做小样本验证）：
+
+```bash
+.venv/bin/qrp-data backfill-fundamentals \
+  --start 2018-01-01 \
+  --end 2026-08-14 \
+  --requests-per-minute 250
+```
+
+任务按“报表 × 股票”保存不可变快照，三张报表的日期参数表示公告日范围；
+`financial_indicators` 表示报告期范围。零行会保存为已覆盖快照。财务指标达到供应商
+100 行返回上限时任务失败并要求缩短区间，不接受可能被截断的数据。
+
+从完成的运行和冻结交易日历构建 P0.8 财务 PIT artifact：
+
+```bash
+.venv/bin/qrp-data build-fundamentals-pit \
+  --run artifacts/ingestion_runs/<run_id> \
+  --calendar data/lake/raw/provider=tushare/dataset=trading_calendar/<file>.parquet
+```
+
+正式回补前可生成研究就绪缺口报告：
+
+```bash
+.venv/bin/qrp-data audit-research-readiness \
+  --start 2018-01-01 \
+  --end 2026-08-14 \
+  --calendar <calendar.parquet> \
+  --fundamental-artifact <fundamental_artifact> \
+  --industry-membership <historical_industry.parquet>
+```
+
+完整的双时间、修订选择和晋级规则见
+`docs/p08_fundamental_pit_standard.md`。
+
 接入并构建 P0.5 可交易性矩阵：
 
 ```bash
@@ -242,7 +277,6 @@ HAC 统计、Top/Bottom 真实组合暴露、换手和年度稳定性评测；�
 - manifest 已增加进程级文件锁；同一 checkpoint 当前仍只允许一个编排进程写入。未来并行 Agent 共享任务状态前，需要增加 checkpoint 锁或迁移到事务型任务存储。
 - AKShare 股票列表只有当前截面，不能用于历史股票池。
 - Tushare 权限受积分影响；当前全市场任务已实现分页、限流、指数退避和断点续传。
-- 财报已保留公告日、实际公告日和修订行，但 Point-in-Time 去重规则会在 curated 层实现。
-- 当前已实现通用的下一交易日可用时间函数；财报 curated 去重仍需在因子层接入该规则。
+- 财报 raw 接口已保留公告日、实际公告日和修订行；P0.8 已实现全市场断点任务、下一交易日可用时间、不可变版本索引和决策时点版本选择。正式多年回补尚未执行。
 - 分析师一致预期必须使用能够提供历史快照/变更时间的数据源后再接入。
 - P0.6.1 已提供真实券商成交校准产物和最小样本门禁，但在导入真实成交回报前，滑点参数仍明确标记为研究假设；日线无法证明盘口排队或集合竞价实际成交。

@@ -221,7 +221,8 @@ def test_factor_timing_fails_closed_on_future_vintage():
                 "estimate_published_at": "2024-01-01T01:00:00Z",
                 "estimate_vintage_at": "2024-01-01T02:00:00Z",
                 "available_at": "2024-01-01T02:00:00Z",
-                "ingested_at": "2024-01-01T03:00:00Z",
+                "ingested_at": "2026-08-14T03:00:00Z",
+                "research_as_of_at": "2026-08-15T00:00:00Z",
                 "decision_at": "2024-01-01T08:00:00Z",
                 "execution_at": "2024-01-02T01:30:00Z",
             }
@@ -232,6 +233,10 @@ def test_factor_timing_fails_closed_on_future_vintage():
     invalid["estimate_vintage_at"] = "2024-01-03T00:00:00Z"
     with pytest.raises(FutureDataError):
         validate_factor_timing(invalid, "analyst_expectation")
+    invalid_ingestion = valid.copy()
+    invalid_ingestion["ingested_at"] = "2026-08-16T00:00:00Z"
+    with pytest.raises(FutureDataError):
+        validate_factor_timing(invalid_ingestion, "analyst_expectation")
 
 
 def test_experiment_registry_is_deterministic_and_periods_are_locked():

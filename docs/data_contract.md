@@ -7,7 +7,9 @@
 - `announcement_date`：供应商提供的公告日期。
 - `actual_announcement_date`：供应商提供的实际公告日期。
 - `available_date`：研究系统允许使用该记录的最早日期；当前规则为实际公告日优先，否则使用公告日。
+- `available_at`：把日期级公告按冻结交易日历映射后的最早系统可用时刻；财报默认下一交易日 09:30。
 - `ingested_at`：平台获取数据的 UTC 时间，不等于历史可用时间。
+- `research_as_of_at`：一次研究冻结的数据快照截止时间，要求 `ingested_at <= research_as_of_at`。
 - `realtime_start/realtime_end`：FRED/ALFRED 中一个观测版本成立的实时区间。
 
 ## 行情单位

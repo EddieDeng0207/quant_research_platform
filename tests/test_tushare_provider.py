@@ -155,11 +155,48 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(row["amount"], 129150.0)
 
     def test_fundamental_uses_actual_announcement_date(self):
-        row = self.provider.fetch_fundamentals(
+        result = self.provider.fetch_fundamentals(
             "income", "000001.SZ", "2024-01-01", "2024-12-31"
-        ).frame.iloc[0]
+        )
+        row = result.frame.iloc[0]
         self.assertEqual(row["report_period"], pd.Timestamp("2024-03-31"))
         self.assertEqual(row["available_date"], pd.Timestamp("2024-04-22"))
+        self.assertEqual(row["statement_type"], "income")
+        self.assertEqual(len(row["source_row_sha256"]), 64)
+        self.assertEqual(result.partition_values, {"symbol": "000001.SZ"})
+
+    def test_empty_fundamental_response_is_a_valid_zero_row_snapshot(self):
+        class EmptyIncomeClient(FakeTushareClient):
+            @staticmethod
+            def income(**kwargs):
+                return pd.DataFrame()
+
+        result = TushareProvider(client=EmptyIncomeClient()).fetch_fundamentals(
+            "income", "000001.SZ", "2024-01-01", "2024-12-31"
+        )
+        self.assertTrue(result.frame.empty)
+        self.assertTrue(result.metadata["empty_snapshot_is_valid"])
+
+    def test_financial_indicator_fails_closed_at_documented_row_limit(self):
+        class TruncatedIndicatorClient(FakeTushareClient):
+            @staticmethod
+            def fina_indicator(**kwargs):
+                return pd.DataFrame(
+                    {
+                        "ts_code": ["000001.SZ"] * 100,
+                        "ann_date": ["20240420"] * 100,
+                        "end_date": ["20240331"] * 100,
+                    }
+                )
+
+        provider = TushareProvider(client=TruncatedIndicatorClient())
+        with self.assertRaisesRegex(ProviderError, "100-row response limit"):
+            provider.fetch_fundamentals(
+                "financial_indicators",
+                "000001.SZ",
+                "2000-01-01",
+                "2024-12-31",
+            )
 
     def test_full_market_daily_partitions_by_trade_date(self):
         result = self.provider.fetch_daily_bars_by_date("2024-01-02")

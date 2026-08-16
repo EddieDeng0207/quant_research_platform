@@ -23,6 +23,7 @@ IC/Rank IC、分层收益、单调性、衰减、换手、年度稳定性与行�
 - `research_eligible`：由历史股票池和 P0.5 约束产生的布尔资格；
 - `decision_at`、`execution_at`：决策和最早执行时点；
 - 因子族对应的事件时间、`available_at` 与 `ingested_at`；
+- 冻结本次数据快照截止时间 `research_as_of_at`；
 - 分析师预期额外要求冻结的 `estimate_vintage_at`。
 
 未来收益标签至少包含 `instrument_id`、`execution_at`、`horizon_sessions`、
@@ -32,7 +33,8 @@ IC/Rank IC、分层收益、单调性、衰减、换手、年度稳定性与行�
 
 ```text
 event_at <= available_at <= decision_at < execution_at
-ingested_at <= decision_at
+ingested_at <= research_as_of_at
+decision_at <= research_as_of_at
 label_start_at >= execution_at
 label_end_at > label_start_at
 ```
@@ -45,6 +47,11 @@ label_end_at > label_start_at
 收益标签只能参与事后评测，不能进入缩尾、中性化、排序或目标权重构建。
 因子观测按 `(instrument_id, decision_at)` 唯一，收益标签按
 `(instrument_id, execution_at, horizon_sessions)` 唯一；重复键直接失败。
+
+`ingested_at` 是本平台实际取得供应商快照的时间，不得伪造成历史时间。历史回补数据
+允许 `ingested_at > decision_at`，但必须满足供应商记录的历史 `available_at` 不晚于
+决策，同时 `ingested_at` 不晚于全文件唯一的 `research_as_of_at`。该双时间契约自
+`p07_single_factor_evaluation_v4` 起生效；v3 报告仍可验证读取，但新产物不再生成 v3。
 
 ## 截面处理
 

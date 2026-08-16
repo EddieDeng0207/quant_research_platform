@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from typing import Any, Callable, Dict, Optional, Sequence
 
@@ -776,8 +777,17 @@ class TushareProvider:
             raise ProviderError(
                 f"Tushare {statement} request failed for {canonical}: {exc}"
             ) from exc
+        if raw is None:
+            raise ProviderError(f"Tushare returned a null {statement} response for {canonical}")
+        if statement == "financial_indicators" and len(raw) >= 100:
+            raise ProviderError(
+                "Tushare fina_indicator reached its documented 100-row response limit; "
+                "narrow the requested date window to prove completeness"
+            )
         if raw.empty:
-            raise ProviderError(f"Tushare returned no {statement} rows for {canonical}")
+            raw = pd.DataFrame(
+                columns=["ts_code", "ann_date", "f_ann_date", "end_date"]
+            )
         frame = raw.rename(
             columns={
                 "ts_code": "symbol",
@@ -786,19 +796,27 @@ class TushareProvider:
                 "f_ann_date": "actual_announcement_date",
             }
         ).copy()
-        frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
+        if "symbol" not in frame:
+            frame["symbol"] = canonical
+        if not frame.empty:
+            frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
         for column in ["report_period", "announcement_date", "actual_announcement_date"]:
-            if column in frame:
-                frame[column] = _parse_yyyymmdd(frame[column])
-        if "actual_announcement_date" in frame:
-            frame["available_date"] = frame["actual_announcement_date"].fillna(
-                frame["announcement_date"]
-            )
-        else:
-            frame["available_date"] = frame["announcement_date"]
+            if column not in frame:
+                frame[column] = pd.NaT
+            frame[column] = _parse_yyyymmdd(frame[column])
+        frame["available_date"] = frame["actual_announcement_date"].fillna(
+            frame["announcement_date"]
+        )
+        frame["statement_type"] = statement
+        row_hashes = _source_row_hashes(frame)
+        frame["source_row_sha256"] = row_hashes
+        frame["source_row_occurrence"] = row_hashes.groupby(row_hashes).cumcount()
         frame["source"] = self.name
         frame["ingested_at"] = _utc_now()
         dataset = f"fundamentals_{statement}"
+        date_filter_semantics = (
+            "report_period" if statement == "financial_indicators" else "announcement_date"
+        )
         return FetchResult(
             dataset=dataset,
             provider=self.name,
@@ -808,5 +826,44 @@ class TushareProvider:
                 "point_in_time_field": "available_date",
                 "available_date_rule": "actual_announcement_date else announcement_date",
                 "raw_revisions_preserved": True,
+                "date_filter_semantics": date_filter_semantics,
+                "documented_response_limit": (
+                    100 if statement == "financial_indicators" else None
+                ),
+                "empty_snapshot_is_valid": True,
             },
+            partition_values={"symbol": canonical},
         ).validate()
+
+
+def _source_row_hashes(frame: pd.DataFrame) -> pd.Series:
+    """Return deterministic identities before ingestion metadata is attached."""
+    if frame.empty:
+        return pd.Series(index=frame.index, dtype="string")
+    columns = sorted(
+        column
+        for column in frame.columns
+        if column not in {"source_row_sha256", "source_row_occurrence", "source", "ingested_at"}
+    )
+
+    def canonical(value: Any) -> Any:
+        if pd.isna(value):
+            return None
+        if isinstance(value, pd.Timestamp):
+            return value.isoformat()
+        if hasattr(value, "item"):
+            value = value.item()
+        return value
+
+    hashes = []
+    for record in frame[columns].to_dict("records"):
+        payload = {key: canonical(value) for key, value in record.items()}
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        hashes.append(hashlib.sha256(encoded).hexdigest())
+    return pd.Series(hashes, index=frame.index, dtype="string")

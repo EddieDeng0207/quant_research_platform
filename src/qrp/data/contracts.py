@@ -204,7 +204,17 @@ def validate_dataset(dataset: str, frame: pd.DataFrame) -> None:
     if dataset.startswith("fundamentals_"):
         _require_columns(
             frame,
-            ("symbol", "report_period", "available_date", "source", "ingested_at"),
+            (
+                "symbol",
+                "statement_type",
+                "report_period",
+                "announcement_date",
+                "available_date",
+                "source_row_sha256",
+                "source_row_occurrence",
+                "source",
+                "ingested_at",
+            ),
             dataset,
         )
     else:
@@ -214,7 +224,7 @@ def validate_dataset(dataset: str, frame: pd.DataFrame) -> None:
         _require_columns(frame, required, dataset)
 
     if frame.empty:
-        if dataset in EMPTY_SNAPSHOT_DATASETS:
+        if dataset in EMPTY_SNAPSHOT_DATASETS or dataset.startswith("fundamentals_"):
             return
         raise DataContractError(f"{dataset} returned no rows")
 
@@ -285,8 +295,33 @@ def validate_dataset(dataset: str, frame: pd.DataFrame) -> None:
             raise DataContractError("corporate action cash/share ratios cannot be negative")
 
     if dataset.startswith("fundamentals_"):
-        invalid = frame["available_date"].isna() | frame["report_period"].isna()
+        report_period = pd.to_datetime(frame["report_period"], errors="coerce")
+        available_date = pd.to_datetime(frame["available_date"], errors="coerce")
+        invalid = available_date.isna() | report_period.isna()
         if invalid.any():
             raise DataContractError(
                 f"{dataset} contains rows without report_period or available_date"
             )
+        if (available_date < report_period).any():
+            raise DataContractError(
+                f"{dataset} contains availability dates before the report period"
+            )
+        expected_statement = dataset.removeprefix("fundamentals_")
+        if not frame["statement_type"].eq(expected_statement).all():
+            raise DataContractError(
+                f"{dataset} contains a mismatched statement_type"
+            )
+        source_hash = frame["source_row_sha256"].astype(str)
+        if not source_hash.str.fullmatch(r"[0-9a-f]{64}").all():
+            raise DataContractError(
+                f"{dataset} contains invalid source-row identities"
+            )
+        occurrence = pd.to_numeric(frame["source_row_occurrence"], errors="coerce")
+        if occurrence.isna().any() or (occurrence < 0).any() or (
+            occurrence % 1 != 0
+        ).any():
+            raise DataContractError(
+                f"{dataset} source_row_occurrence must be a non-negative integer"
+            )
+        if frame.duplicated(["source_row_sha256", "source_row_occurrence"]).any():
+            raise DataContractError(f"{dataset} contains duplicate source rows")

@@ -14,6 +14,12 @@ from .config import load_env_file
 from .data.audit import audit_lake, write_audit_report
 from .data.corporate_actions import build_corporate_action_artifact
 from .data.curated import build_curated_price_artifact
+from .data.fundamental_ingestion import (
+    FUNDAMENTAL_STATEMENTS,
+    FundamentalBackfillConfig,
+    FundamentalIngestionRunner,
+)
+from .data.fundamentals import build_fundamental_pit_artifact
 from .data.ingestion import (
     DEFAULT_REQUESTS_PER_MINUTE,
     P0BackfillConfig,
@@ -21,6 +27,10 @@ from .data.ingestion import (
     RateLimiter,
 )
 from .data.providers.base import FetchResult, ProviderError
+from .data.readiness import (
+    audit_research_readiness,
+    write_research_readiness_report,
+)
 from .data.registry import PROVIDER_CAPABILITIES, create_provider
 from .data.reporting import generate_ingestion_report
 from .data.storage import ParquetLake
@@ -94,8 +104,16 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     fundamentals.add_argument("--symbol", action="append", required=True)
-    fundamentals.add_argument("--start", required=True, help="announcement start date")
-    fundamentals.add_argument("--end", required=True, help="announcement end date")
+    fundamentals.add_argument(
+        "--start",
+        required=True,
+        help="announcement start for statements; report-period start for indicators",
+    )
+    fundamentals.add_argument(
+        "--end",
+        required=True,
+        help="announcement end for statements; report-period end for indicators",
+    )
     fundamentals.add_argument("--period")
     fundamentals.add_argument("--data-root", default="data/lake")
 
@@ -163,6 +181,71 @@ def _build_parser() -> argparse.ArgumentParser:
     p05.add_argument("--data-root", default="data/lake")
     p05.add_argument("--artifact-root", default="artifacts")
     p05.add_argument("--state-root", default="state")
+
+    fundamental_backfill = subparsers.add_parser(
+        "backfill-fundamentals",
+        help="run or resume the full-universe P0.8 financial-statement grid",
+    )
+    fundamental_backfill.add_argument("--start", required=True)
+    fundamental_backfill.add_argument("--end", required=True)
+    fundamental_backfill.add_argument(
+        "--statement",
+        action="append",
+        choices=FUNDAMENTAL_STATEMENTS,
+        help="repeat to select statements; defaults to all four families",
+    )
+    fundamental_backfill.add_argument(
+        "--symbol",
+        action="append",
+        help="optional explicit pilot universe; defaults to the frozen full security master",
+    )
+    fundamental_backfill.add_argument(
+        "--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE
+    )
+    fundamental_backfill.add_argument("--max-attempts", type=int, default=3)
+    fundamental_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
+    fundamental_backfill.add_argument(
+        "--job-name", default="p08_fundamentals_backfill"
+    )
+    fundamental_backfill.add_argument("--data-root", default="data/lake")
+    fundamental_backfill.add_argument("--artifact-root", default="artifacts")
+    fundamental_backfill.add_argument("--state-root", default="state")
+
+    fundamental_pit = subparsers.add_parser(
+        "build-fundamentals-pit",
+        help="build an immutable next-session-available P0.8 financial artifact",
+    )
+    fundamental_pit.add_argument("--run", required=True)
+    fundamental_pit.add_argument("--calendar", required=True)
+    fundamental_pit.add_argument("--data-root", default="data/lake")
+    fundamental_pit.add_argument("--output-root", default="data/curated")
+    fundamental_pit.add_argument("--as-of-ingested-at")
+    fundamental_pit.add_argument(
+        "--aliases", default="configs/instrument_aliases.json"
+    )
+    fundamental_pit.add_argument("--security-code-mappings")
+    fundamental_pit.add_argument("--allow-failed-promotion", action="store_true")
+    fundamental_pit.add_argument(
+        "--allow-dirty-code",
+        action="store_true",
+        help="allow exploratory output without a clean committed Git identity",
+    )
+
+    readiness = subparsers.add_parser(
+        "audit-research-readiness",
+        help="gate multi-year market, fundamental, and historical-industry coverage",
+    )
+    readiness.add_argument("--start", required=True)
+    readiness.add_argument("--end", required=True)
+    readiness.add_argument("--calendar", required=True)
+    readiness.add_argument("--fundamental-artifact")
+    readiness.add_argument("--industry-membership")
+    readiness.add_argument("--minimum-weekly-periods", type=int, default=104)
+    readiness.add_argument("--data-root", default="data/lake")
+    readiness.add_argument(
+        "--output", default="artifacts/audits/latest_research_readiness.json"
+    )
+    readiness.add_argument("--allow-not-ready", action="store_true")
 
     limits = subparsers.add_parser("daily-limits", help="ingest full-market daily price limits")
     limits.add_argument("--provider", choices=("tushare",), default="tushare")
@@ -581,6 +664,69 @@ def main(argv: List[str] = None) -> int:
         print(f"built P0.7 factor report -> {output}")
         return 0
     try:
+        if args.command == "backfill-fundamentals":
+            provider = create_provider("tushare")
+            config = FundamentalBackfillConfig(
+                start_date=args.start,
+                end_date=args.end,
+                statements=tuple(args.statement or FUNDAMENTAL_STATEMENTS),
+                symbols=tuple(args.symbol or ()),
+                requests_per_minute=args.requests_per_minute,
+                max_attempts=args.max_attempts,
+                retry_base_seconds=args.retry_base_seconds,
+                job_name=args.job_name,
+            )
+            run_path = FundamentalIngestionRunner(
+                provider=provider,
+                lake=ParquetLake(Path(args.data_root)),
+                artifact_root=Path(args.artifact_root),
+                state_root=Path(args.state_root),
+            ).run(config)
+            print(f"completed P0.8 fundamental ingestion -> {run_path}")
+            return 0
+
+        if args.command == "build-fundamentals-pit":
+            output = build_fundamental_pit_artifact(
+                run_path=Path(args.run),
+                lake_root=Path(args.data_root),
+                calendar_path=Path(args.calendar),
+                output_root=Path(args.output_root),
+                as_of_ingested_at=args.as_of_ingested_at,
+                aliases_path=Path(args.aliases) if args.aliases else None,
+                security_code_mappings_path=(
+                    Path(args.security_code_mappings)
+                    if args.security_code_mappings
+                    else None
+                ),
+                require_clean_git=not args.allow_dirty_code,
+                strict=not args.allow_failed_promotion,
+            )
+            print(f"built P0.8 fundamental PIT artifact -> {output}")
+            return 0
+
+        if args.command == "audit-research-readiness":
+            report = audit_research_readiness(
+                lake_root=Path(args.data_root),
+                calendar_path=Path(args.calendar),
+                start_date=args.start,
+                end_date=args.end,
+                fundamental_artifact=(
+                    Path(args.fundamental_artifact)
+                    if args.fundamental_artifact
+                    else None
+                ),
+                industry_membership_path=(
+                    Path(args.industry_membership)
+                    if args.industry_membership
+                    else None
+                ),
+                minimum_weekly_periods=args.minimum_weekly_periods,
+            )
+            output = write_research_readiness_report(report, Path(args.output))
+            print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+            print(f"wrote research-readiness report -> {output}")
+            return 0 if report.passed or args.allow_not_ready else 1
+
         if args.command in {"backfill-p0", "backfill-p05"}:
             provider = create_provider("tushare")
             datasets = (

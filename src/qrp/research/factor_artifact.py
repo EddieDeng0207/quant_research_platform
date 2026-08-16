@@ -114,7 +114,7 @@ def build_factor_evaluation_artifact(
         }
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p07_single_factor_evaluation_v3",
+        "schema_version": frozen.version,
         "identity": identity,
         "factor_spec": {**asdict(frozen), "sha256": frozen.fingerprint},
         "inputs": {
@@ -164,7 +164,10 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
     if not manifest_path.exists():
         raise FactorEvaluationError(f"factor manifest not found: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != "p07_single_factor_evaluation_v3":
+    if manifest.get("schema_version") not in {
+        "p07_single_factor_evaluation_v3",
+        "p07_single_factor_evaluation_v4",
+    }:
         raise FactorEvaluationError("report input is not a P0.7 factor artifact")
     for name, metadata in manifest["outputs"].items():
         path = root / metadata["path"]

@@ -100,7 +100,7 @@ class RateLimiter:
 class RunRecorder:
     """Persist config, runtime, source identity, events, and terminal status."""
 
-    def __init__(self, artifact_root: Path, config: P0BackfillConfig, config_hash: str) -> None:
+    def __init__(self, artifact_root: Path, config: Any, config_hash: str) -> None:
         timestamp = pd.Timestamp.now(tz="UTC").strftime("%Y%m%dT%H%M%SZ")
         self.run_id = f"{timestamp}_{config_hash[:12]}_{uuid.uuid4().hex[:6]}"
         self.path = Path(artifact_root) / "ingestion_runs" / self.run_id
