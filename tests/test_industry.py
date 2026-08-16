@@ -83,6 +83,7 @@ def test_industry_artifact_switches_taxonomy_without_hindsight(tmp_path: Path):
     )
     membership = pd.read_parquet(artifact / "membership.parquet")
     assert len(membership) == 2
+    assert set(membership["instrument_id"]) == {"CN_EQ:000001.SZ"}
     old = select_industry_as_of(membership, "2021-12-10 15:00:00+08:00")
     new = select_industry_as_of(membership, "2021-12-13 15:00:00+08:00")
     assert old.iloc[0]["taxonomy"] == "SW2014"
@@ -91,6 +92,43 @@ def test_industry_artifact_switches_taxonomy_without_hindsight(tmp_path: Path):
     manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["quality"]["promotion_passed"]
     assert manifest["guardrails"]["taxonomy_revision_not_backfilled"]
+    assert manifest["guardrails"]["stable_instrument_identity_mapping"]
+    assert manifest["quality"]["hard_failures"]["invalid_instrument_namespace_rows"] == 0
+
+
+def test_industry_artifact_reuses_bse_security_code_mapping(tmp_path: Path):
+    class FakeBSEIndustryProvider(FakeIndustryProvider):
+        def fetch_industry_members(self, *args, **kwargs):
+            result = super().fetch_industry_members(*args, **kwargs)
+            result.frame["symbol"] = "873690.BJ"
+            return result
+
+    run = IndustryIngestionRunner(
+        provider=FakeBSEIndustryProvider(),
+        lake=ParquetLake(tmp_path / "lake"),
+        artifact_root=tmp_path / "artifacts",
+        state_root=tmp_path / "state",
+    ).run(IndustryBackfillConfig(requests_per_minute=100000, retry_base_seconds=0))
+    mappings = tmp_path / "bse_mappings.parquet"
+    pd.DataFrame(
+        {
+            "historical_symbol": ["873690.BJ"],
+            "current_symbol": ["920690.BJ"],
+        }
+    ).to_parquet(mappings, index=False)
+    artifact = build_historical_industry_artifact(
+        run,
+        tmp_path / "lake",
+        tmp_path / "curated",
+        "2016-01-01",
+        "2024-12-31",
+        security_code_mappings_path=mappings,
+    )
+    membership = pd.read_parquet(artifact / "membership.parquet")
+    assert set(membership["instrument_id"]) == {"CN_EQ:BSE:920690.BJ"}
+    assert membership["identity_alias_resolved"].all()
+    manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+    assert "security_code_mappings" in manifest["identity"]["aliases"]
 
 
 def test_industry_runner_resumes_from_category_checkpoints(tmp_path: Path):

@@ -254,6 +254,10 @@ def _audit_industry_membership(
         }
     valid_dates = pd.notna(covered_start) and pd.notna(covered_end)
     instruments = int(frame["instrument_id"].nunique())
+    valid_namespace = frame["instrument_id"].astype("string").str.startswith(
+        "CN_EQ:", na=False
+    )
+    invalid_instrument_namespace_rows = int((~valid_namespace).sum())
     covers = bool(valid_dates and covered_start <= start and covered_end >= end)
     overlapping_intervals = 0
     if temporal_contract == "effective_interval":
@@ -272,6 +276,7 @@ def _audit_industry_membership(
             and artifact_hash_valid
             and artifact_promoted
             and overlapping_intervals == 0
+            and invalid_instrument_namespace_rows == 0
         ),
         "path": str(source),
         "sha256": _sha256(source),
@@ -284,6 +289,7 @@ def _audit_industry_membership(
         "artifact_hash_valid": artifact_hash_valid,
         "artifact_promoted": artifact_promoted,
         "overlapping_intervals": overlapping_intervals,
+        "invalid_instrument_namespace_rows": invalid_instrument_namespace_rows,
     }
 
 

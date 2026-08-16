@@ -91,6 +91,24 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
     assert report.passed
     assert all(item["complete"] for item in report.datasets.values())
 
+    invalid_namespace = tmp_path / "industry_invalid_namespace.parquet"
+    pd.read_parquet(industry).assign(instrument_id="000001.SZ").to_parquet(
+        invalid_namespace, index=False
+    )
+    namespace_report = audit_research_readiness(
+        lake,
+        calendar,
+        "2024-01-02",
+        "2024-01-03",
+        fundamental_artifact=fundamental,
+        industry_membership_path=invalid_namespace,
+        minimum_weekly_periods=1,
+        minimum_fundamental_symbols=1,
+        minimum_industry_instruments=1,
+    )
+    assert not namespace_report.passed
+    assert namespace_report.industry_membership["invalid_instrument_namespace_rows"] == 1
+
     missing_industry = audit_research_readiness(
         lake,
         calendar,

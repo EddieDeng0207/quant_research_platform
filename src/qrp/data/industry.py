@@ -16,7 +16,9 @@ from qrp.versioning import (
     inspect_git_repository,
 )
 
-INDUSTRY_POLICY_VERSION = "p08_shenwan_l1_effective_interval_v1"
+from .fundamentals import _load_aliases
+
+INDUSTRY_POLICY_VERSION = "p08_shenwan_l1_effective_interval_v2"
 TAXONOMY_WINDOWS = {
     "SW2014": (None, pd.Timestamp("2021-12-12")),
     "SW2021": (pd.Timestamp("2021-12-13"), None),
@@ -34,6 +36,8 @@ def build_historical_industry_artifact(
     start_date: str,
     end_date: str,
     *,
+    aliases_path: Optional[Path] = None,
+    security_code_mappings_path: Optional[Path] = None,
     require_clean_git: bool = False,
     strict: bool = True,
 ) -> Path:
@@ -106,7 +110,12 @@ def build_historical_industry_artifact(
                 "written_at": entry["written_at"],
             }
         )
-    membership = _curate_membership(pd.concat(frames, ignore_index=True), start, end)
+    aliases, alias_identity = _load_aliases(
+        aliases_path, security_code_mappings_path
+    )
+    membership = _curate_membership(
+        pd.concat(frames, ignore_index=True), start, end, aliases
+    )
     hard_failures = _quality_failures(membership, start, end)
     quality = {
         "rows": len(membership),
@@ -130,7 +139,7 @@ def build_historical_industry_artifact(
         if require_clean_git:
             raise
     identity = {
-        "schema_version": "p08_historical_industry_v1",
+        "schema_version": "p08_historical_industry_v2",
         "policy_version": INDUSTRY_POLICY_VERSION,
         "start_date": str(start.date()),
         "end_date": str(end.date()),
@@ -147,6 +156,7 @@ def build_historical_industry_artifact(
         "raw_inputs": [
             {"path": item["path"], "sha256": item["sha256"]} for item in raw_inputs
         ],
+        "aliases": alias_identity,
         "implementation_sha256": _implementation_sha256(),
         "git_commit": code_identity["commit"] if code_identity else None,
         "git_tree": code_identity["tree"] if code_identity else None,
@@ -167,7 +177,7 @@ def build_historical_industry_artifact(
     )
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p08_historical_industry_v1",
+        "schema_version": "p08_historical_industry_v2",
         "identity": identity,
         "inputs": {"run": str(run), "lake_root": str(lake), "raw": raw_inputs},
         "outputs": {
@@ -187,6 +197,8 @@ def build_historical_industry_artifact(
             "source_intervals_preserved": True,
             "source_out_date_treated_as_exclusive": True,
             "overlapping_instrument_intervals_forbidden": True,
+            "stable_instrument_identity_mapping": True,
+            "cn_equity_namespace_enforced": True,
             "raw_inputs_hash_verified": True,
             "git_commit_bound": code_identity is not None,
         },
@@ -225,7 +237,10 @@ def select_industry_as_of(frame: pd.DataFrame, decision_at: Any) -> pd.DataFrame
 
 
 def _curate_membership(
-    frame: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+    frame: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    aliases: Dict[str, str],
 ) -> pd.DataFrame:
     required = {
         "taxonomy",
@@ -254,7 +269,10 @@ def _curate_membership(
     )
     if result[["source_membership_start", "source_ingested_at"]].isna().any(axis=None):
         raise IndustryPITError("industry raw rows contain invalid temporal fields")
-    result["instrument_id"] = result["symbol"].astype("string")
+    result["instrument_id"] = result["symbol"].astype("string").map(
+        lambda symbol: aliases.get(str(symbol), f"CN_EQ:{symbol}")
+    )
+    result["identity_alias_resolved"] = result["symbol"].astype(str).isin(aliases)
     starts = []
     ends = []
     for row in result.itertuples(index=False):
@@ -309,6 +327,9 @@ def _quality_failures(
         "overlapping_instrument_intervals": int(overlaps.sum()),
         "unexpected_taxonomies": int((~frame["taxonomy"].isin(TAXONOMY_WINDOWS)).sum()),
         "non_l1_rows": int((~frame["industry_level"].eq("L1")).sum()),
+        "invalid_instrument_namespace_rows": int(
+            (~frame["instrument_id"].astype("string").str.startswith("CN_EQ:", na=False)).sum()
+        ),
         "coverage_start_after_requested": int(frame["membership_start"].min() > start),
         "coverage_end_before_requested": int(frame["membership_end"].max() < end),
     }
@@ -360,6 +381,7 @@ def _implementation_sha256() -> str:
         [
             Path(__file__),
             Path(__file__).with_name("industry_ingestion.py"),
+            Path(__file__).with_name("fundamentals.py"),
             Path(__file__).with_name("contracts.py"),
             Path(__file__).parent / "providers" / "tushare.py",
         ]

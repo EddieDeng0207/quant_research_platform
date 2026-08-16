@@ -21,6 +21,7 @@ from .data.fundamental_ingestion import (
 )
 from .data.fundamentals import build_fundamental_pit_artifact
 from .data.industry import build_historical_industry_artifact
+from .data.industry_coverage import build_industry_coverage_audit
 from .data.industry_ingestion import (
     INDUSTRY_TAXONOMIES,
     IndustryBackfillConfig,
@@ -276,8 +277,27 @@ def _build_parser() -> argparse.ArgumentParser:
     industry_pit.add_argument("--end", required=True)
     industry_pit.add_argument("--data-root", default="data/lake")
     industry_pit.add_argument("--output-root", default="data/curated")
+    industry_pit.add_argument(
+        "--aliases", default="configs/instrument_aliases.json"
+    )
+    industry_pit.add_argument("--security-code-mappings")
     industry_pit.add_argument("--allow-failed-promotion", action="store_true")
     industry_pit.add_argument("--allow-dirty-code", action="store_true")
+
+    industry_coverage = subparsers.add_parser(
+        "audit-industry-coverage",
+        help="build a PIT daily financial-to-industry identity coverage audit",
+    )
+    industry_coverage.add_argument("--fundamental-artifact", required=True)
+    industry_coverage.add_argument("--industry-artifact", required=True)
+    industry_coverage.add_argument("--calendar", required=True)
+    industry_coverage.add_argument("--start", required=True)
+    industry_coverage.add_argument("--end", required=True)
+    industry_coverage.add_argument("--minimum-coverage", type=float, default=0.80)
+    industry_coverage.add_argument(
+        "--output-root", default="artifacts/audits/industry_coverage"
+    )
+    industry_coverage.add_argument("--allow-dirty-code", action="store_true")
 
     readiness = subparsers.add_parser(
         "audit-research-readiness",
@@ -740,10 +760,30 @@ def main(argv: List[str] = None) -> int:
                 output_root=Path(args.output_root),
                 start_date=args.start,
                 end_date=args.end,
+                aliases_path=Path(args.aliases) if args.aliases else None,
+                security_code_mappings_path=(
+                    Path(args.security_code_mappings)
+                    if args.security_code_mappings
+                    else None
+                ),
                 require_clean_git=not args.allow_dirty_code,
                 strict=not args.allow_failed_promotion,
             )
             print(f"built P0.8 historical industry artifact -> {output}")
+            return 0
+
+        if args.command == "audit-industry-coverage":
+            output = build_industry_coverage_audit(
+                fundamental_artifact=Path(args.fundamental_artifact),
+                industry_artifact=Path(args.industry_artifact),
+                calendar_path=Path(args.calendar),
+                output_root=Path(args.output_root),
+                start_date=args.start,
+                end_date=args.end,
+                minimum_coverage=args.minimum_coverage,
+                require_clean_git=not args.allow_dirty_code,
+            )
+            print(f"built P0.8 industry coverage audit -> {output}")
             return 0
 
         if args.command == "backfill-fundamentals":
