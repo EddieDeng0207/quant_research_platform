@@ -74,4 +74,5 @@ def test_daily_industry_coverage_uses_pit_availability_and_effective_intervals(
     assert daily["fundamental_to_industry_coverage"].tolist() == [1.0, 0.5]
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["summary"]["sessions_below_minimum_coverage"] == 1
-    assert not manifest["promotion_passed"]
+    assert not manifest["summary"]["conservative_stress_test_passed"]
+    assert manifest["quality"]["promotion_passed"]

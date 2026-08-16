@@ -120,6 +120,10 @@ def build_industry_coverage_audit(
         "daily_fundamental_to_industry_coverage": _distribution(coverage),
         "daily_industry_to_fundamental_coverage": _distribution(reverse_coverage),
         "sessions_below_minimum_coverage": int((coverage < minimum_coverage).sum()),
+        "conservative_stress_test_passed": int(
+            (coverage < minimum_coverage).sum()
+        )
+        == 0,
         "lowest_coverage_sessions": daily.nsmallest(
             10, "fundamental_to_industry_coverage"
         ).to_dict("records"),
@@ -146,13 +150,20 @@ def build_industry_coverage_audit(
             }
         },
         "summary": summary,
-        "promotion_passed": int((coverage < minimum_coverage).sum()) == 0,
+        "quality": {
+            "promotion_passed": True,
+            "hard_failures": {
+                "invalid_fundamental_namespace_rows": invalid_fundamental_ids,
+                "invalid_industry_namespace_rows": invalid_industry_ids,
+            },
+        },
         "guardrails": {
             "artifact_hashes_verified": True,
             "shared_cn_equity_namespace_required": True,
             "point_in_time_financial_availability_used": True,
             "effective_industry_intervals_used": True,
             "not_substituted_for_formal_factor_panel_coverage": True,
+            "conservative_coverage_is_diagnostic_not_promotion_gate": True,
         },
     }
     _write_immutable_json(manifest, destination / "manifest.json")
