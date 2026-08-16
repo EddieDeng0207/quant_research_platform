@@ -160,6 +160,7 @@ def test_pit_builder_does_not_depend_on_deprecated_all_null_concat(tmp_path):
     _calendar(calendar)
     with warnings.catch_warnings():
         warnings.simplefilter("error", FutureWarning)
+        warnings.simplefilter("error", pd.errors.PerformanceWarning)
         build_fundamental_pit_artifact(
             run,
             tmp_path / "lake",

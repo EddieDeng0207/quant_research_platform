@@ -476,10 +476,7 @@ def _concat_statement_parts(parts: Sequence[pd.DataFrame]) -> pd.DataFrame:
     columns = list(dict.fromkeys(column for part in parts for column in part.columns))
     informative = [part.dropna(axis="columns", how="all") for part in parts]
     combined = pd.concat(informative, ignore_index=True, sort=False)
-    for column in columns:
-        if column not in combined:
-            combined[column] = pd.NA
-    return combined.reindex(columns=columns)
+    return combined.reindex(columns=columns).copy()
 
 
 def _version_id(row: pd.Series) -> str:
