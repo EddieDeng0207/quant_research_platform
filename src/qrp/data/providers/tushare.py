@@ -25,6 +25,10 @@ TUSHARE_PAGE_SIZES: Dict[str, int] = {
     "dividend": 2000,
     "index_classify": 1000,
     "index_member": 2000,
+    "income_vip": 9000,
+    "balancesheet_vip": 9000,
+    "cashflow_vip": 9000,
+    "fina_indicator_vip": 9000,
 }
 MAX_PAGINATION_PAGES = 100
 
@@ -899,6 +903,81 @@ class TushareProvider:
             raw = pd.DataFrame(
                 columns=["ts_code", "ann_date", "f_ann_date", "end_date"]
             )
+        return self._normalize_fundamentals(
+            raw,
+            statement,
+            query={"endpoint": endpoint, **params},
+            partition_values={"symbol": canonical},
+            metadata={
+                "date_filter_semantics": (
+                    "report_period"
+                    if statement == "financial_indicators"
+                    else "announcement_date"
+                ),
+                "documented_response_limit": (
+                    100 if statement == "financial_indicators" else None
+                ),
+                "request_axis": "symbol",
+            },
+            fallback_symbol=canonical,
+        )
+
+    def fetch_fundamentals_by_period(
+        self, statement: str, period: str
+    ) -> FetchResult:
+        """Fetch one full-market report period through the privileged endpoints."""
+        endpoints: Dict[str, str] = {
+            "income": "income_vip",
+            "balance_sheet": "balancesheet_vip",
+            "cashflow": "cashflow_vip",
+            "financial_indicators": "fina_indicator_vip",
+        }
+        if statement not in endpoints:
+            raise ProviderError(f"Unsupported fundamental statement: {statement}")
+        normalized_period = pd.Timestamp(period).strftime("%Y%m%d")
+        endpoint = endpoints[statement]
+        try:
+            raw, pagination = self._fetch_paginated(
+                endpoint, {"period": normalized_period}
+            )
+        except Exception as exc:
+            raise ProviderError(
+                f"Tushare {endpoint} request failed for {normalized_period}: {exc}"
+            ) from exc
+        if raw is None:
+            raise ProviderError(
+                f"Tushare returned a null {endpoint} response for {normalized_period}"
+            )
+        if raw.empty:
+            raw = pd.DataFrame(
+                columns=["ts_code", "ann_date", "f_ann_date", "end_date"]
+            )
+        return self._normalize_fundamentals(
+            raw,
+            statement,
+            query={
+                "endpoint": endpoint,
+                "period": normalized_period,
+                "page_size": TUSHARE_PAGE_SIZES[endpoint],
+            },
+            partition_values={"report_period": str(pd.Timestamp(period).date())},
+            metadata={
+                "date_filter_semantics": "report_period",
+                "request_axis": "full_market_report_period",
+                "pagination": pagination,
+            },
+        )
+
+    def _normalize_fundamentals(
+        self,
+        raw: pd.DataFrame,
+        statement: str,
+        *,
+        query: Dict[str, Any],
+        partition_values: Dict[str, Any],
+        metadata: Dict[str, Any],
+        fallback_symbol: Optional[str] = None,
+    ) -> FetchResult:
         frame = raw.rename(
             columns={
                 "ts_code": "symbol",
@@ -908,7 +987,7 @@ class TushareProvider:
             }
         ).copy()
         if "symbol" not in frame:
-            frame["symbol"] = canonical
+            frame["symbol"] = fallback_symbol
         if not frame.empty:
             frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
         for column in ["report_period", "announcement_date", "actual_announcement_date"]:
@@ -925,25 +1004,19 @@ class TushareProvider:
         frame["source"] = self.name
         frame["ingested_at"] = _utc_now()
         dataset = f"fundamentals_{statement}"
-        date_filter_semantics = (
-            "report_period" if statement == "financial_indicators" else "announcement_date"
-        )
         return FetchResult(
             dataset=dataset,
             provider=self.name,
             frame=frame.sort_values(["available_date", "report_period"]).reset_index(drop=True),
-            query={"endpoint": endpoint, **params},
+            query=query,
             metadata={
                 "point_in_time_field": "available_date",
                 "available_date_rule": "actual_announcement_date else announcement_date",
                 "raw_revisions_preserved": True,
-                "date_filter_semantics": date_filter_semantics,
-                "documented_response_limit": (
-                    100 if statement == "financial_indicators" else None
-                ),
                 "empty_snapshot_is_valid": True,
+                **metadata,
             },
-            partition_values={"symbol": canonical},
+            partition_values=partition_values,
         ).validate()
 
 

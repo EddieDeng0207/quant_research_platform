@@ -38,6 +38,8 @@ class FakeTushareClient:
             }
         )
 
+    income_vip = income
+
     @staticmethod
     def adj_factor(**kwargs):
         return pd.DataFrame(
@@ -190,6 +192,15 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(row["statement_type"], "income")
         self.assertEqual(len(row["source_row_sha256"]), 64)
         self.assertEqual(result.partition_values, {"symbol": "000001.SZ"})
+
+    def test_vip_fundamental_is_partitioned_by_report_period(self):
+        result = self.provider.fetch_fundamentals_by_period("income", "2024-03-31")
+        self.assertEqual(result.frame.iloc[0]["symbol"], "000001.SZ")
+        self.assertEqual(result.query["endpoint"], "income_vip")
+        self.assertEqual(result.partition_values, {"report_period": "2024-03-31"})
+        self.assertEqual(
+            result.metadata["request_axis"], "full_market_report_period"
+        )
 
     def test_empty_fundamental_response_is_a_valid_zero_row_snapshot(self):
         class EmptyIncomeClient(FakeTushareClient):
@@ -361,6 +372,10 @@ class TushareProviderTests(unittest.TestCase):
                 "dividend": 2000,
                 "index_classify": 1000,
                 "index_member": 2000,
+                "income_vip": 9000,
+                "balancesheet_vip": 9000,
+                "cashflow_vip": 9000,
+                "fina_indicator_vip": 9000,
             },
         )
 

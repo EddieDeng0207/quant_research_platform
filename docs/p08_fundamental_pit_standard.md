@@ -41,6 +41,16 @@ decision_at <= research_as_of_at
 (statement_type, symbol, requested_date_window)
 ```
 
+拥有5000积分 VIP 权限时，正式全市场回补使用 `--by-period-vip`，任务网格改为：
+
+```text
+(statement_type, report_period)
+```
+
+报告期模式直接取得该季度包含退市公司的全市场披露，不依赖今天的上市股票列表，且把
+2014年起的季度作为2016年因子研究的两年 warm-up。分页达到上限、分页重复或任务缺失
+都 fail closed。普通权限和小样本试跑仍保留按股票模式。
+
 默认报表族：
 
 - `income`；

@@ -8,6 +8,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -49,6 +50,7 @@ class FundamentalBackfillConfig:
     job_name: str = "p08_fundamentals_backfill"
     ingestion_policy_version: str = FUNDAMENTAL_INGESTION_POLICY_VERSION
     workers: int = 1
+    period_mode: bool = False
 
     def validate(self) -> "FundamentalBackfillConfig":
         start = pd.Timestamp(self.start_date).normalize()
@@ -66,6 +68,8 @@ class FundamentalBackfillConfig:
             normalized = tuple(normalize_cn_symbol(symbol) for symbol in self.symbols)
             if len(set(normalized)) != len(normalized):
                 raise ValueError("fundamental symbols must be unique")
+        if self.period_mode and self.symbols:
+            raise ValueError("period_mode cannot be combined with explicit symbols")
         if not self.instrument_statuses and not self.symbols:
             raise ValueError("instrument_statuses are required when symbols are not explicit")
         if self.requests_per_minute <= 0:
@@ -124,18 +128,39 @@ class FundamentalIngestionRunner:
         }
         recorder.event("run_started", state_path=str(state_path.resolve()))
         try:
-            symbols = self._resolve_symbols(
-                frozen, limiter, state, state_path, recorder, summary
-            )
-            summary["symbols"] = len(symbols)
+            symbols: Tuple[str, ...] = ()
+            periods: Tuple[str, ...] = ()
+            if frozen.period_mode:
+                periods = _freeze_periods(frozen, state, state_path)
+                summary["periods"] = len(periods)
+            else:
+                symbols = self._resolve_symbols(
+                    frozen, limiter, state, state_path, recorder, summary
+                )
+                summary["symbols"] = len(symbols)
             summary["statements"] = len(frozen.statements)
-            summary["expected_statement_tasks"] = len(symbols) * len(
+            tasks = []
+            cells = periods if frozen.period_mode else symbols
+            summary["expected_statement_tasks"] = len(cells) * len(
                 frozen.statements
             )
-            tasks = []
             for statement in frozen.statements:
-                for symbol in symbols:
-                    task_id = f"fundamentals_{statement}:{symbol}"
+                for cell in cells:
+                    task_id = f"fundamentals_{statement}:{cell}"
+                    if frozen.period_mode:
+                        call = partial(
+                            self.provider.fetch_fundamentals_by_period,
+                            statement,
+                            cell,
+                        )
+                    else:
+                        call = partial(
+                            self.provider.fetch_fundamentals,
+                            statement,
+                            cell,
+                            frozen.start_date,
+                            frozen.end_date,
+                        )
                     if task_id in state["completed"]:
                         summary["skipped_from_checkpoint"] += 1
                         recorder.event(
@@ -143,17 +168,7 @@ class FundamentalIngestionRunner:
                         )
                         continue
                     tasks.append(
-                        (
-                            task_id,
-                            lambda statement=statement, symbol=symbol: (
-                                self.provider.fetch_fundamentals(
-                                    statement,
-                                    symbol,
-                                    frozen.start_date,
-                                    frozen.end_date,
-                                )
-                            ),
-                        )
+                        (task_id, call)
                     )
             if frozen.workers == 1:
                 for task_id, call in tasks:
@@ -354,6 +369,7 @@ def _data_job_hash(config: FundamentalBackfillConfig) -> str:
         "end_date": config.end_date,
         "statements": config.statements,
         "symbols": config.symbols,
+        "period_mode": config.period_mode,
         "instrument_statuses": config.instrument_statuses,
         "job_name": config.job_name,
         "ingestion_policy_version": config.ingestion_policy_version,
@@ -374,7 +390,31 @@ def _load_or_initialize_state(path: Path, data_job_hash: str) -> Dict[str, Any]:
         "created_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "completed": {},
         "symbols": [],
+        "periods": [],
         "excluded_legacy_instruments": [],
     }
     _atomic_json_write(path, state)
     return state
+
+
+def _freeze_periods(
+    config: FundamentalBackfillConfig,
+    state: Dict[str, Any],
+    state_path: Path,
+) -> Tuple[str, ...]:
+    start = pd.Timestamp(config.start_date).normalize()
+    end = pd.Timestamp(config.end_date).normalize()
+    candidates = []
+    for year in range(start.year, end.year + 1):
+        for month, day in ((3, 31), (6, 30), (9, 30), (12, 31)):
+            value = pd.Timestamp(year=year, month=month, day=day)
+            if start <= value <= end:
+                candidates.append(str(value.date()))
+    periods = tuple(candidates)
+    if not periods:
+        raise RuntimeError("period_mode produced no quarterly report periods")
+    if state.get("periods") and tuple(state["periods"]) != periods:
+        raise RuntimeError("checkpoint report-period grid differs from configuration")
+    state["periods"] = list(periods)
+    _atomic_json_write(state_path, state)
+    return periods

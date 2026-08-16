@@ -89,6 +89,12 @@ class _Provider:
             partition_values={"symbol": symbol},
         ).validate()
 
+    def fetch_fundamentals_by_period(self, statement, period):
+        self.calls.append((statement, period))
+        result = self.fetch_fundamentals(statement, "000001.SZ", period, period)
+        result.partition_values = {"report_period": period}
+        return result
+
 
 def test_fundamental_runner_freezes_universe_checkpoints_and_empty_snapshots(tmp_path):
     provider = _Provider()
@@ -137,3 +143,25 @@ def test_explicit_pilot_symbols_do_not_fetch_current_instrument_master(tmp_path)
         )
     )
     assert provider.calls == [("income", "000001.SZ", "2024-01-01", "2024-12-31")]
+
+
+def test_period_mode_freezes_quarter_grid_without_current_instrument_master(tmp_path):
+    provider = _Provider()
+    run = FundamentalIngestionRunner(
+        provider=provider,
+        lake=ParquetLake(tmp_path / "lake"),
+        artifact_root=tmp_path / "artifacts",
+        state_root=tmp_path / "state",
+    ).run(
+        FundamentalBackfillConfig(
+            start_date="2024-01-01",
+            end_date="2024-12-31",
+            statements=("income",),
+            period_mode=True,
+            requests_per_minute=100000,
+        )
+    )
+    manifest = json.loads((run / "run_manifest.json").read_text())
+    assert manifest["summary"]["periods"] == 4
+    assert manifest["summary"]["expected_statement_tasks"] == 4
+    assert not any(call[0] == "instruments" for call in provider.calls)

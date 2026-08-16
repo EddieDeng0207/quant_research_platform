@@ -78,16 +78,19 @@ def build_fundamental_pit_artifact(
     state = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     statements = tuple(config.get("statements", ()))
     symbols = tuple(state.get("symbols", ()))
-    if not statements or not symbols:
-        raise FundamentalPITError("fundamental run has an empty statement or symbol grid")
+    periods = tuple(state.get("periods", ()))
+    period_mode = bool(config.get("period_mode", False))
+    if not statements or (period_mode and not periods) or (not period_mode and not symbols):
+        raise FundamentalPITError("fundamental run has an empty statement task grid")
     unknown = sorted(set(statements) - set(FUNDAMENTAL_STATEMENTS))
     if unknown:
         raise FundamentalPITError(f"fundamental run contains unknown statements: {unknown}")
 
+    cells = periods if period_mode else symbols
     expected_tasks = {
-        f"fundamentals_{statement}:{symbol}"
+        f"fundamentals_{statement}:{cell}"
         for statement in statements
-        for symbol in symbols
+        for cell in cells
     }
     completed = state.get("completed", {})
     missing_tasks = sorted(expected_tasks - set(completed))
@@ -146,6 +149,19 @@ def build_fundamental_pit_artifact(
             }
         )
     research_as_of_at = cutoff or max(written_times)
+    if period_mode:
+        symbols = tuple(
+            sorted(
+                {
+                    str(symbol)
+                    for parts in frames_by_statement.values()
+                    for frame in parts
+                    for symbol in frame["symbol"].dropna().unique()
+                }
+            )
+        )
+        if not symbols:
+            raise FundamentalPITError("period-mode run produced no financial symbols")
 
     calendar = pd.read_parquet(calendar_file)
     _validate_calendar(calendar)
@@ -211,6 +227,8 @@ def build_fundamental_pit_artifact(
         "captured_statement_tasks": len(raw_inputs),
         "zero_row_tasks": zero_row_tasks,
         "symbols": len(symbols),
+        "request_axis": "report_period" if period_mode else "symbol",
+        "report_periods": len(periods) if period_mode else None,
         "excluded_legacy_instruments": len(
             state.get("excluded_legacy_instruments", [])
         ),

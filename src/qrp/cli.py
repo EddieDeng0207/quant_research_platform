@@ -214,6 +214,11 @@ def _build_parser() -> argparse.ArgumentParser:
     fundamental_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
     fundamental_backfill.add_argument("--workers", type=int, default=1)
     fundamental_backfill.add_argument(
+        "--by-period-vip",
+        action="store_true",
+        help="use full-market quarterly VIP endpoints instead of the per-symbol grid",
+    )
+    fundamental_backfill.add_argument(
         "--job-name", default="p08_fundamentals_backfill"
     )
     fundamental_backfill.add_argument("--data-root", default="data/lake")
@@ -753,6 +758,7 @@ def main(argv: List[str] = None) -> int:
                 retry_base_seconds=args.retry_base_seconds,
                 job_name=args.job_name,
                 workers=args.workers,
+                period_mode=args.by_period_vip,
             )
             run_path = FundamentalIngestionRunner(
                 provider=provider,

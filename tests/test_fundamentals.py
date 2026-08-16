@@ -49,6 +49,11 @@ class _VersionedProvider:
             partition_values={"symbol": symbol},
         ).validate()
 
+    def fetch_fundamentals_by_period(self, statement, period):
+        result = self.fetch_fundamentals(statement, "000001.SZ", period, period)
+        result.partition_values = {"report_period": period}
+        return result
+
 
 def _calendar(path):
     frame = pd.DataFrame(
@@ -113,6 +118,32 @@ def test_pit_artifact_delays_date_only_disclosures_and_selects_historical_revisi
     manifest = json.loads((artifact / "manifest.json").read_text())
     assert manifest["quality"]["promotion_passed"]
     assert manifest["guardrails"]["report_period_is_not_knowledge_time"]
+
+
+def test_pit_artifact_accepts_full_market_report_period_grid(tmp_path):
+    lake = ParquetLake(tmp_path / "lake")
+    run = FundamentalIngestionRunner(
+        provider=_VersionedProvider(),
+        lake=lake,
+        artifact_root=tmp_path / "artifacts",
+        state_root=tmp_path / "state",
+    ).run(
+        FundamentalBackfillConfig(
+            start_date="2023-12-31",
+            end_date="2023-12-31",
+            statements=("balance_sheet",),
+            period_mode=True,
+            requests_per_minute=100000,
+        )
+    )
+    calendar = tmp_path / "calendar.parquet"
+    _calendar(calendar)
+    artifact = build_fundamental_pit_artifact(
+        run, tmp_path / "lake", calendar, tmp_path / "curated"
+    )
+    manifest = json.loads((artifact / "manifest.json").read_text())
+    assert manifest["quality"]["request_axis"] == "report_period"
+    assert manifest["quality"]["symbols"] == 1
 
 
 def test_as_of_selection_rejects_ambiguous_same_timestamp_versions():
