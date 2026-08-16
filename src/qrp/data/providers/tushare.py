@@ -23,6 +23,8 @@ TUSHARE_PAGE_SIZES: Dict[str, int] = {
     "bak_basic": 7000,
     "bse_mapping": 1000,
     "dividend": 2000,
+    "index_classify": 1000,
+    "index_member": 2000,
 }
 MAX_PAGINATION_PAGES = 100
 
@@ -50,6 +52,7 @@ class TushareProvider:
         "security_code_mappings",
         "corporate_actions",
         "fundamentals",
+        "historical_industry_membership",
     )
 
     def __init__(self, token: Optional[str] = None, client: Optional[Any] = None) -> None:
@@ -201,6 +204,114 @@ class TushareProvider:
                 "exchange": exchange,
                 "start_date": start_date,
                 "end_date": end_date,
+            },
+        ).validate()
+
+    def fetch_industry_classification(
+        self, taxonomy: str, industry_level: str = "L1"
+    ) -> FetchResult:
+        """Fetch one frozen Shenwan taxonomy catalogue."""
+        if taxonomy not in {"SW2014", "SW2021"}:
+            raise ProviderError(f"Unsupported Shenwan taxonomy: {taxonomy}")
+        if industry_level != "L1":
+            raise ProviderError("The research neutralization contract currently requires L1")
+        try:
+            raw, pagination = self._fetch_paginated(
+                "index_classify", {"level": industry_level, "src": taxonomy}
+            )
+        except Exception as exc:
+            raise ProviderError(
+                f"Tushare industry classification request failed for {taxonomy}: {exc}"
+            ) from exc
+        if raw.empty:
+            raise ProviderError(f"Tushare returned no {taxonomy} classifications")
+        frame = raw.rename(columns={"index_code": "source_index_code"}).copy()
+        frame["taxonomy"] = taxonomy
+        frame["industry_level"] = frame["level"].astype("string")
+        frame["industry_code"] = frame["industry_code"].astype("string")
+        frame["industry_name"] = frame["industry_name"].astype("string")
+        frame["source_index_code"] = frame["source_index_code"].astype("string")
+        frame["source"] = self.name
+        frame["ingested_at"] = _utc_now()
+        return FetchResult(
+            dataset="industry_classification",
+            provider=self.name,
+            frame=frame,
+            query={
+                "endpoint": "index_classify",
+                "taxonomy": taxonomy,
+                "industry_level": industry_level,
+                "page_size": TUSHARE_PAGE_SIZES["index_classify"],
+            },
+            metadata={"pagination": pagination},
+            partition_values={"taxonomy": taxonomy, "industry_level": industry_level},
+        ).validate()
+
+    def fetch_industry_members(
+        self,
+        taxonomy: str,
+        source_index_code: str,
+        industry_code: str,
+        industry_name: str,
+        industry_level: str = "L1",
+    ) -> FetchResult:
+        """Fetch every historical membership interval for one industry index."""
+        try:
+            raw, pagination = self._fetch_paginated(
+                "index_member", {"index_code": source_index_code}
+            )
+        except Exception as exc:
+            raise ProviderError(
+                f"Tushare industry member request failed for {source_index_code}: {exc}"
+            ) from exc
+        if raw.empty:
+            raise ProviderError(
+                f"Tushare returned no industry members for {source_index_code}"
+            )
+        frame = raw.rename(
+            columns={
+                "con_code": "symbol",
+                "in_date": "source_membership_start",
+                "out_date": "source_membership_end",
+            }
+        ).copy()
+        frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
+        frame["source_membership_start"] = _parse_yyyymmdd(
+            frame["source_membership_start"]
+        )
+        frame["source_membership_end"] = _parse_yyyymmdd(
+            frame["source_membership_end"]
+        )
+        frame["taxonomy"] = taxonomy
+        frame["industry_level"] = industry_level
+        frame["industry_code"] = str(industry_code)
+        frame["industry_name"] = str(industry_name)
+        frame["source_index_code"] = str(source_index_code)
+        frame["is_current"] = frame.get(
+            "is_new", pd.Series(pd.NA, index=frame.index, dtype="string")
+        ).astype("string")
+        frame["source"] = self.name
+        frame["ingested_at"] = _utc_now()
+        return FetchResult(
+            dataset="industry_membership",
+            provider=self.name,
+            frame=frame,
+            query={
+                "endpoint": "index_member",
+                "taxonomy": taxonomy,
+                "source_index_code": source_index_code,
+                "industry_code": industry_code,
+                "industry_level": industry_level,
+                "page_size": TUSHARE_PAGE_SIZES["index_member"],
+            },
+            metadata={
+                "pagination": pagination,
+                "membership_interval_semantics": "inclusive_source_dates",
+            },
+            partition_values={
+                "taxonomy": taxonomy,
+                "industry_level": industry_level,
+                "source_index_code": source_index_code,
             },
         ).validate()
 

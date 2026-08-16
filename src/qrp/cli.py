@@ -20,6 +20,12 @@ from .data.fundamental_ingestion import (
     FundamentalIngestionRunner,
 )
 from .data.fundamentals import build_fundamental_pit_artifact
+from .data.industry import build_historical_industry_artifact
+from .data.industry_ingestion import (
+    INDUSTRY_TAXONOMIES,
+    IndustryBackfillConfig,
+    IndustryIngestionRunner,
+)
 from .data.ingestion import (
     DEFAULT_REQUESTS_PER_MINUTE,
     P0BackfillConfig,
@@ -160,6 +166,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backfill.add_argument("--max-attempts", type=int, default=3)
     backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
+    backfill.add_argument("--workers", type=int, default=1)
     backfill.add_argument("--job-name", default="p0_backfill")
     backfill.add_argument("--skip-instruments", action="store_true")
     backfill.add_argument("--data-root", default="data/lake")
@@ -177,6 +184,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p05.add_argument("--max-attempts", type=int, default=3)
     p05.add_argument("--retry-base-seconds", type=float, default=2.0)
+    p05.add_argument("--workers", type=int, default=1)
     p05.add_argument("--job-name", default="p05_tradability_backfill")
     p05.add_argument("--data-root", default="data/lake")
     p05.add_argument("--artifact-root", default="artifacts")
@@ -204,6 +212,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     fundamental_backfill.add_argument("--max-attempts", type=int, default=3)
     fundamental_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
+    fundamental_backfill.add_argument("--workers", type=int, default=1)
     fundamental_backfill.add_argument(
         "--job-name", default="p08_fundamentals_backfill"
     )
@@ -230,6 +239,40 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow exploratory output without a clean committed Git identity",
     )
+
+    industry_backfill = subparsers.add_parser(
+        "backfill-industry",
+        help="run or resume SW2014/SW2021 L1 historical membership ingestion",
+    )
+    industry_backfill.add_argument(
+        "--taxonomy",
+        action="append",
+        choices=INDUSTRY_TAXONOMIES,
+        help="repeat to select taxonomies; defaults to both historical regimes",
+    )
+    industry_backfill.add_argument(
+        "--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE
+    )
+    industry_backfill.add_argument("--max-attempts", type=int, default=5)
+    industry_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
+    industry_backfill.add_argument(
+        "--job-name", default="p08_industry_membership_backfill"
+    )
+    industry_backfill.add_argument("--data-root", default="data/lake")
+    industry_backfill.add_argument("--artifact-root", default="artifacts")
+    industry_backfill.add_argument("--state-root", default="state")
+
+    industry_pit = subparsers.add_parser(
+        "build-industry-pit",
+        help="build a taxonomy-versioned immutable historical industry artifact",
+    )
+    industry_pit.add_argument("--run", required=True)
+    industry_pit.add_argument("--start", required=True)
+    industry_pit.add_argument("--end", required=True)
+    industry_pit.add_argument("--data-root", default="data/lake")
+    industry_pit.add_argument("--output-root", default="data/curated")
+    industry_pit.add_argument("--allow-failed-promotion", action="store_true")
+    industry_pit.add_argument("--allow-dirty-code", action="store_true")
 
     readiness = subparsers.add_parser(
         "audit-research-readiness",
@@ -666,6 +709,38 @@ def main(argv: List[str] = None) -> int:
         print(f"built P0.7 factor report -> {output}")
         return 0
     try:
+        if args.command == "backfill-industry":
+            provider = create_provider("tushare")
+            run_path = IndustryIngestionRunner(
+                provider=provider,
+                lake=ParquetLake(Path(args.data_root)),
+                artifact_root=Path(args.artifact_root),
+                state_root=Path(args.state_root),
+            ).run(
+                IndustryBackfillConfig(
+                    taxonomies=tuple(args.taxonomy or INDUSTRY_TAXONOMIES),
+                    requests_per_minute=args.requests_per_minute,
+                    max_attempts=args.max_attempts,
+                    retry_base_seconds=args.retry_base_seconds,
+                    job_name=args.job_name,
+                )
+            )
+            print(f"completed P0.8 industry ingestion -> {run_path}")
+            return 0
+
+        if args.command == "build-industry-pit":
+            output = build_historical_industry_artifact(
+                run_path=Path(args.run),
+                lake_root=Path(args.data_root),
+                output_root=Path(args.output_root),
+                start_date=args.start,
+                end_date=args.end,
+                require_clean_git=not args.allow_dirty_code,
+                strict=not args.allow_failed_promotion,
+            )
+            print(f"built P0.8 historical industry artifact -> {output}")
+            return 0
+
         if args.command == "backfill-fundamentals":
             provider = create_provider("tushare")
             config = FundamentalBackfillConfig(
@@ -677,6 +752,7 @@ def main(argv: List[str] = None) -> int:
                 max_attempts=args.max_attempts,
                 retry_base_seconds=args.retry_base_seconds,
                 job_name=args.job_name,
+                workers=args.workers,
             )
             run_path = FundamentalIngestionRunner(
                 provider=provider,
@@ -758,6 +834,7 @@ def main(argv: List[str] = None) -> int:
                 max_attempts=args.max_attempts,
                 retry_base_seconds=args.retry_base_seconds,
                 job_name=args.job_name,
+                workers=args.workers,
             )
             run_path = P0IngestionRunner(
                 provider=provider,

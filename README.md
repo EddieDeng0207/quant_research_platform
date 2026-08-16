@@ -98,6 +98,7 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 .venv/bin/qrp-data backfill-p0 \
   --start 2024-01-02 \
   --end 2024-01-05 \
+  --workers 8 \
   --requests-per-minute 250
 ```
 
@@ -109,6 +110,7 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 .venv/bin/qrp-data backfill-fundamentals \
   --start 2018-01-01 \
   --end 2026-08-14 \
+  --workers 8 \
   --requests-per-minute 250
 ```
 
@@ -137,6 +139,19 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 
 完整的双时间、修订选择和晋级规则见
 `docs/p08_fundamental_pit_standard.md`。
+
+历史行业归属使用申万2014/2021两个版本的历史成员区间，不允许把新版分类回填旧时期：
+
+```bash
+.venv/bin/qrp-data backfill-industry --requests-per-minute 250
+.venv/bin/qrp-data build-industry-pit \
+  --run <completed_run> \
+  --start 2016-01-01 \
+  --end 2026-08-14
+```
+
+分类体系在2021-12-13切换，完整标准见
+`docs/p08_historical_industry_standard.md`。
 
 接入并构建 P0.5 可交易性矩阵：
 

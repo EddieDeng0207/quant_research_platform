@@ -9,9 +9,11 @@ import os
 import platform
 import shutil
 import sys
+import threading
 import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
@@ -52,6 +54,7 @@ class P0BackfillConfig:
     retry_base_seconds: float = 2.0
     job_name: str = "p0_backfill"
     ingestion_policy_version: str = INGESTION_POLICY_VERSION
+    workers: int = 1
 
     def validate(self) -> "P0BackfillConfig":
         start = pd.Timestamp(self.start_date)
@@ -67,6 +70,8 @@ class P0BackfillConfig:
             raise ValueError("requests_per_minute must be positive")
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
+        if self.workers <= 0:
+            raise ValueError("workers must be positive")
         if not self.ingestion_policy_version:
             raise ValueError("ingestion_policy_version must not be empty")
         return self
@@ -87,14 +92,16 @@ class RateLimiter:
         self.clock = clock
         self.sleeper = sleeper
         self.last_request_at: Optional[float] = None
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
-        now = self.clock()
-        if self.last_request_at is not None:
-            remaining = self.minimum_interval - (now - self.last_request_at)
-            if remaining > 0:
-                self.sleeper(remaining)
-        self.last_request_at = self.clock()
+        with self._lock:
+            now = self.clock()
+            if self.last_request_at is not None:
+                remaining = self.minimum_interval - (now - self.last_request_at)
+                if remaining > 0:
+                    self.sleeper(remaining)
+            self.last_request_at = self.clock()
 
 
 class RunRecorder:
@@ -106,6 +113,7 @@ class RunRecorder:
         self.path = Path(artifact_root) / "ingestion_runs" / self.run_id
         self.path.mkdir(parents=True, exist_ok=False)
         self.events_path = self.path / "events.jsonl"
+        self._event_lock = threading.Lock()
         self.started_at = pd.Timestamp.now(tz="UTC")
         source_identity = _snapshot_source(self.path / "source_snapshot")
         _atomic_json_write(self.path / "config_snapshot.json", asdict(config))
@@ -132,8 +140,12 @@ class RunRecorder:
             "event": event_type,
             **payload,
         }
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False, default=str, sort_keys=True) + "\n")
+        with self._event_lock:
+            with self.events_path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(entry, ensure_ascii=False, default=str, sort_keys=True)
+                    + "\n"
+                )
 
     def close(self, status: str, summary: Mapping[str, Any]) -> None:
         finished_at = pd.Timestamp.now(tz="UTC")
@@ -244,13 +256,28 @@ class P0IngestionRunner:
             if not open_dates:
                 raise RuntimeError("The requested range contains no open trading dates")
 
+            tasks = []
             for trade_date in open_dates:
                 for dataset in config.datasets:
-                    method = getattr(self.provider, P0_DATASET_METHODS[dataset])
                     task_id = f"{dataset}:{trade_date}"
+                    if task_id in state["completed"]:
+                        summary["skipped_from_checkpoint"] += 1
+                        recorder.event(
+                            "task_skipped", task_id=task_id, reason="checkpoint"
+                        )
+                        continue
+                    method = getattr(self.provider, P0_DATASET_METHODS[dataset])
+                    tasks.append(
+                        (
+                            task_id,
+                            lambda method=method, trade_date=trade_date: method(trade_date),
+                        )
+                    )
+            if config.workers == 1:
+                for task_id, call in tasks:
                     self._execute_task(
                         task_id,
-                        lambda method=method, trade_date=trade_date: method(trade_date),
+                        call,
                         config,
                         limiter,
                         state,
@@ -258,6 +285,16 @@ class P0IngestionRunner:
                         recorder,
                         summary,
                     )
+            else:
+                self._execute_tasks_concurrently(
+                    tasks,
+                    config,
+                    limiter,
+                    state,
+                    state_path,
+                    recorder,
+                    summary,
+                )
             summary["open_dates"] = len(open_dates)
             summary["checkpoint"] = str(state_path)
             recorder.event("run_completed", **summary)
@@ -296,6 +333,40 @@ class P0IngestionRunner:
         state["completed"][task_id] = str(path)
         _atomic_json_write(state_path, state)
         _record_success(recorder, summary, task_id, result, path)
+
+    def _execute_tasks_concurrently(
+        self,
+        tasks: list[tuple[str, Callable[[], FetchResult]]],
+        config: P0BackfillConfig,
+        limiter: RateLimiter,
+        state: Dict[str, Any],
+        state_path: Path,
+        recorder: RunRecorder,
+        summary: Dict[str, Any],
+    ) -> None:
+        with ThreadPoolExecutor(max_workers=config.workers) as executor:
+            pending = {
+                executor.submit(
+                    self._fetch_and_write,
+                    task_id,
+                    call,
+                    config,
+                    limiter,
+                    recorder,
+                ): task_id
+                for task_id, call in tasks
+            }
+            try:
+                for future in as_completed(pending):
+                    task_id = pending[future]
+                    result, path = future.result()
+                    state["completed"][task_id] = str(path)
+                    _atomic_json_write(state_path, state)
+                    _record_success(recorder, summary, task_id, result, path)
+            except Exception:
+                for future in pending:
+                    future.cancel()
+                raise
 
     def _fetch_and_write(
         self,

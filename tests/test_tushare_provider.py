@@ -142,6 +142,32 @@ class FakeTushareClient:
             }
         )
 
+    @staticmethod
+    def index_classify(**kwargs):
+        return pd.DataFrame(
+            {
+                "index_code": ["801780.SI"],
+                "industry_name": ["银行"],
+                "level": ["L1"],
+                "industry_code": ["480000"],
+                "is_pub": [1],
+                "parent_code": ["0"],
+                "src": [kwargs["src"]],
+            }
+        )
+
+    @staticmethod
+    def index_member(**kwargs):
+        return pd.DataFrame(
+            {
+                "index_code": [kwargs["index_code"]],
+                "con_code": ["000001.SZ"],
+                "in_date": ["19910403"],
+                "out_date": [None],
+                "is_new": ["Y"],
+            }
+        )
+
 
 class TushareProviderTests(unittest.TestCase):
     def setUp(self):
@@ -213,6 +239,21 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(adjustment.frame.iloc[0]["adj_factor"], 1.23)
         self.assertEqual(indicators.frame.iloc[0]["total_mv"], 1_000_000.0)
         self.assertEqual(indicators.frame.iloc[0]["circ_mv"], 800_000.0)
+
+    def test_historical_industry_contract_preserves_source_intervals(self):
+        classification = self.provider.fetch_industry_classification("SW2014")
+        row = classification.frame.iloc[0]
+        members = self.provider.fetch_industry_members(
+            "SW2014",
+            row["source_index_code"],
+            row["industry_code"],
+            row["industry_name"],
+        )
+        member = members.frame.iloc[0]
+        self.assertEqual(member["symbol"], "000001.SZ")
+        self.assertEqual(member["taxonomy"], "SW2014")
+        self.assertEqual(member["source_membership_start"], pd.Timestamp("1991-04-03"))
+        self.assertTrue(pd.isna(member["source_membership_end"]))
 
     def test_stock_status_contract(self):
         row = self.provider.fetch_stock_status_by_date("2024-01-02").frame.iloc[0]
@@ -304,6 +345,8 @@ class TushareProviderTests(unittest.TestCase):
                 "bak_basic": 7000,
                 "bse_mapping": 1000,
                 "dividend": 2000,
+                "index_classify": 1000,
+                "index_member": 2000,
             },
         )
 

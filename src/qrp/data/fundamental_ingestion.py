@@ -6,6 +6,7 @@ import hashlib
 import json
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -47,6 +48,7 @@ class FundamentalBackfillConfig:
     retry_base_seconds: float = 2.0
     job_name: str = "p08_fundamentals_backfill"
     ingestion_policy_version: str = FUNDAMENTAL_INGESTION_POLICY_VERSION
+    workers: int = 1
 
     def validate(self) -> "FundamentalBackfillConfig":
         start = pd.Timestamp(self.start_date).normalize()
@@ -70,6 +72,8 @@ class FundamentalBackfillConfig:
             raise ValueError("requests_per_minute must be positive")
         if self.max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
+        if self.workers <= 0:
+            raise ValueError("workers must be positive")
         if self.retry_base_seconds < 0:
             raise ValueError("retry_base_seconds must be non-negative")
         if not self.ingestion_policy_version:
@@ -128,19 +132,34 @@ class FundamentalIngestionRunner:
             summary["expected_statement_tasks"] = len(symbols) * len(
                 frozen.statements
             )
+            tasks = []
             for statement in frozen.statements:
                 for symbol in symbols:
                     task_id = f"fundamentals_{statement}:{symbol}"
+                    if task_id in state["completed"]:
+                        summary["skipped_from_checkpoint"] += 1
+                        recorder.event(
+                            "task_skipped", task_id=task_id, reason="checkpoint"
+                        )
+                        continue
+                    tasks.append(
+                        (
+                            task_id,
+                            lambda statement=statement, symbol=symbol: (
+                                self.provider.fetch_fundamentals(
+                                    statement,
+                                    symbol,
+                                    frozen.start_date,
+                                    frozen.end_date,
+                                )
+                            ),
+                        )
+                    )
+            if frozen.workers == 1:
+                for task_id, call in tasks:
                     self._execute_task(
                         task_id,
-                        lambda statement=statement, symbol=symbol: (
-                            self.provider.fetch_fundamentals(
-                                statement,
-                                symbol,
-                                frozen.start_date,
-                                frozen.end_date,
-                            )
-                        ),
+                        call,
                         frozen,
                         limiter,
                         state,
@@ -148,6 +167,16 @@ class FundamentalIngestionRunner:
                         recorder,
                         summary,
                     )
+            else:
+                self._execute_tasks_concurrently(
+                    tasks,
+                    frozen,
+                    limiter,
+                    state,
+                    state_path,
+                    recorder,
+                    summary,
+                )
             summary["checkpoint"] = str(state_path.resolve())
             summary["excluded_legacy_instruments"] = len(
                 state.get("excluded_legacy_instruments", [])
@@ -257,6 +286,40 @@ class FundamentalIngestionRunner:
                     raise
                 self.sleeper(config.retry_base_seconds * (2 ** (attempt - 1)))
         raise AssertionError("unreachable")
+
+    def _execute_tasks_concurrently(
+        self,
+        tasks: list[tuple[str, Callable[[], FetchResult]]],
+        config: FundamentalBackfillConfig,
+        limiter: RateLimiter,
+        state: Dict[str, Any],
+        state_path: Path,
+        recorder: RunRecorder,
+        summary: Dict[str, Any],
+    ) -> None:
+        with ThreadPoolExecutor(max_workers=config.workers) as executor:
+            pending = {
+                executor.submit(
+                    self._fetch_with_retry,
+                    task_id,
+                    call,
+                    config,
+                    limiter,
+                    recorder,
+                ): task_id
+                for task_id, call in tasks
+            }
+            try:
+                for future in as_completed(pending):
+                    task_id = pending[future]
+                    result, path = future.result()
+                    state["completed"][task_id] = str(path.resolve())
+                    _atomic_json_write(state_path, state)
+                    self._record_success(task_id, result, path, recorder, summary)
+            except Exception:
+                for future in pending:
+                    future.cancel()
+                raise
 
     @staticmethod
     def _record_success(

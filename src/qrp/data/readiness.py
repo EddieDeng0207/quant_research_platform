@@ -206,9 +206,28 @@ def _audit_industry_membership(
     if path is None:
         return {"ready": False, "reason": "not_provided"}
     source = Path(path)
+    artifact_manifest = None
+    if source.is_dir():
+        manifest_path = source / "manifest.json"
+        if not manifest_path.exists():
+            return {"ready": False, "reason": "missing_manifest", "path": str(source)}
+        artifact_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        source = source / "membership.parquet"
     if not source.exists():
         return {"ready": False, "reason": "missing_file", "path": str(source)}
     frame = pd.read_parquet(source)
+    artifact_hash_valid = True
+    artifact_promoted = True
+    if artifact_manifest is not None:
+        output = artifact_manifest.get("outputs", {}).get("membership", {})
+        artifact_hash_valid = (
+            output.get("path") == source.name
+            and output.get("sha256") == _sha256(source)
+            and int(output.get("rows", -1)) == len(frame)
+        )
+        artifact_promoted = bool(
+            artifact_manifest.get("quality", {}).get("promotion_passed", False)
+        )
     base_required = {"instrument_id", "industry_code"}
     missing = sorted(base_required - set(frame.columns))
     if missing:
@@ -236,8 +255,24 @@ def _audit_industry_membership(
     valid_dates = pd.notna(covered_start) and pd.notna(covered_end)
     instruments = int(frame["instrument_id"].nunique())
     covers = bool(valid_dates and covered_start <= start and covered_end >= end)
+    overlapping_intervals = 0
+    if temporal_contract == "effective_interval":
+        ordered = frame.assign(
+            _start=pd.to_datetime(frame["membership_start"], errors="coerce"),
+            _end=pd.to_datetime(frame["membership_end"], errors="coerce"),
+        ).sort_values(["instrument_id", "_start", "_end"])
+        previous_end = ordered.groupby("instrument_id")["_end"].shift()
+        overlapping_intervals = int(
+            (previous_end.notna() & ordered["_start"].le(previous_end)).sum()
+        )
     return {
-        "ready": covers and instruments >= minimum_instruments,
+        "ready": (
+            covers
+            and instruments >= minimum_instruments
+            and artifact_hash_valid
+            and artifact_promoted
+            and overlapping_intervals == 0
+        ),
         "path": str(source),
         "sha256": _sha256(source),
         "rows": len(frame),
@@ -246,6 +281,9 @@ def _audit_industry_membership(
         "temporal_contract": temporal_contract,
         "covered_start": str(covered_start.date()) if pd.notna(covered_start) else None,
         "covered_end": str(covered_end.date()) if pd.notna(covered_end) else None,
+        "artifact_hash_valid": artifact_hash_valid,
+        "artifact_promoted": artifact_promoted,
+        "overlapping_intervals": overlapping_intervals,
     }
 
 

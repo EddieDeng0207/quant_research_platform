@@ -133,6 +133,27 @@ REQUIRED_COLUMNS: Dict[str, Sequence[str]] = {
         "source",
         "ingested_at",
     ),
+    "industry_classification": (
+        "taxonomy",
+        "industry_level",
+        "industry_code",
+        "industry_name",
+        "source_index_code",
+        "source",
+        "ingested_at",
+    ),
+    "industry_membership": (
+        "taxonomy",
+        "industry_level",
+        "industry_code",
+        "industry_name",
+        "source_index_code",
+        "symbol",
+        "source_membership_start",
+        "source_membership_end",
+        "source",
+        "ingested_at",
+    ),
     "security_code_mappings": (
         "historical_symbol",
         "current_symbol",
@@ -177,6 +198,13 @@ UNIQUE_KEYS: Dict[str, Sequence[str]] = {
     "daily_limits": ("symbol", "trade_date"),
     "daily_suspensions": ("symbol", "trade_date", "suspend_type", "suspend_timing"),
     "historical_instruments": ("symbol", "trade_date"),
+    "industry_classification": ("taxonomy", "industry_level", "industry_code"),
+    "industry_membership": (
+        "taxonomy",
+        "industry_code",
+        "symbol",
+        "source_membership_start",
+    ),
     "security_code_mappings": ("historical_symbol", "current_symbol"),
     "corporate_actions": ("source_action_id",),
     "macro_observations": (
@@ -281,6 +309,16 @@ def validate_dataset(dataset: str, frame: pd.DataFrame) -> None:
 
     if dataset == "daily_suspensions" and not frame["suspend_type"].isin(["S", "R"]).all():
         raise DataContractError("daily_suspensions suspend_type must be S or R")
+
+    if dataset == "industry_membership":
+        starts = pd.to_datetime(frame["source_membership_start"], errors="coerce")
+        ends = pd.to_datetime(frame["source_membership_end"], errors="coerce")
+        if starts.isna().any():
+            raise DataContractError("industry_membership requires membership start dates")
+        if (ends.notna() & ends.lt(starts)).any():
+            raise DataContractError("industry_membership contains end dates before start dates")
+        if not frame["industry_level"].eq("L1").all():
+            raise DataContractError("industry_membership currently supports L1 only")
 
     if dataset == "corporate_actions":
         dates = frame[["report_period", "announcement_date"]].apply(
