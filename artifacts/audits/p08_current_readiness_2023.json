@@ -1,0 +1,130 @@
+{
+  "datasets": {
+    "adjustment_factors": {
+      "complete": false,
+      "covered_partitions": 0,
+      "expected_partitions": 242,
+      "first_partition": null,
+      "last_partition": null,
+      "latest_rows": 0,
+      "missing_partitions": 242,
+      "missing_sample": [
+        "2023-01-03",
+        "2023-01-04",
+        "2023-01-05",
+        "2023-01-06",
+        "2023-01-09",
+        "2023-01-10",
+        "2023-01-11",
+        "2023-01-12",
+        "2023-01-13",
+        "2023-01-16"
+      ],
+      "superseded_snapshots": 0
+    },
+    "daily_bars": {
+      "complete": true,
+      "covered_partitions": 242,
+      "expected_partitions": 242,
+      "first_partition": "2023-01-03",
+      "last_partition": "2023-12-29",
+      "latest_rows": 1258734,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 0
+    },
+    "daily_indicators": {
+      "complete": false,
+      "covered_partitions": 0,
+      "expected_partitions": 242,
+      "first_partition": null,
+      "last_partition": null,
+      "latest_rows": 0,
+      "missing_partitions": 242,
+      "missing_sample": [
+        "2023-01-03",
+        "2023-01-04",
+        "2023-01-05",
+        "2023-01-06",
+        "2023-01-09",
+        "2023-01-10",
+        "2023-01-11",
+        "2023-01-12",
+        "2023-01-13",
+        "2023-01-16"
+      ],
+      "superseded_snapshots": 0
+    },
+    "daily_limits": {
+      "complete": true,
+      "covered_partitions": 242,
+      "expected_partitions": 242,
+      "first_partition": "2023-01-03",
+      "last_partition": "2023-12-29",
+      "latest_rows": 1577070,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 0
+    },
+    "daily_suspensions": {
+      "complete": true,
+      "covered_partitions": 242,
+      "expected_partitions": 242,
+      "first_partition": "2023-01-03",
+      "last_partition": "2023-12-29",
+      "latest_rows": 12095,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 0
+    },
+    "historical_instruments": {
+      "complete": true,
+      "covered_partitions": 242,
+      "expected_partitions": 242,
+      "first_partition": "2023-01-03",
+      "last_partition": "2023-12-29",
+      "latest_rows": 1248612,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 0
+    },
+    "stock_status": {
+      "complete": true,
+      "covered_partitions": 242,
+      "expected_partitions": 242,
+      "first_partition": "2023-01-03",
+      "last_partition": "2023-12-29",
+      "latest_rows": 31617,
+      "missing_partitions": 0,
+      "missing_sample": [],
+      "superseded_snapshots": 0
+    }
+  },
+  "end_date": "2023-12-29",
+  "estimated_weekly_periods": 50,
+  "expected_open_sessions": 242,
+  "fundamentals": {
+    "artifact_id": "991176f3ce7c028858c4",
+    "minimum_symbols": 200,
+    "missing_statements": [],
+    "output_hash_failures": [],
+    "promotion_passed": true,
+    "ready": false,
+    "research_as_of_at": "2026-08-16T00:34:57.237353+00:00",
+    "schema_version": "p08_fundamental_pit_v1",
+    "symbols": 2
+  },
+  "hard_failures": {
+    "fundamental_artifact_missing_or_failed": 1,
+    "historical_industry_membership_missing_or_failed": 1,
+    "insufficient_weekly_periods": 1,
+    "missing_daily_partitions": 484
+  },
+  "industry_membership": {
+    "ready": false,
+    "reason": "not_provided"
+  },
+  "minimum_weekly_periods": 104,
+  "passed": false,
+  "start_date": "2023-01-03"
+}
