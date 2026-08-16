@@ -9,7 +9,11 @@ from typing import Any, Callable, Dict, Optional, Sequence
 
 import pandas as pd
 
-from ..contracts import normalize_cn_instrument_symbol, normalize_cn_symbol
+from ..contracts import (
+    DataContractError,
+    normalize_cn_instrument_symbol,
+    normalize_cn_symbol,
+)
 from .base import FetchResult, ProviderError
 
 TUSHARE_PAGE_SIZES: Dict[str, int] = {
@@ -989,7 +993,12 @@ class TushareProvider:
         if "symbol" not in frame:
             frame["symbol"] = fallback_symbol
         if not frame.empty:
-            frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
+            frame["source_symbol"] = frame["symbol"].astype("string")
+            normalized = frame["source_symbol"].map(_try_normalize_cn_symbol)
+            frame["instrument_kind"] = normalized.isna().map(
+                {True: "vendor_nonstandard", False: "stock"}
+            )
+            frame["symbol"] = normalized.fillna(frame["source_symbol"])
         for column in ["report_period", "announcement_date", "actual_announcement_date"]:
             if column not in frame:
                 frame[column] = pd.NaT
@@ -1051,3 +1060,10 @@ def _source_row_hashes(frame: pd.DataFrame) -> pd.Series:
         ).encode("utf-8")
         hashes.append(hashlib.sha256(encoded).hexdigest())
     return pd.Series(hashes, index=frame.index, dtype="string")
+
+
+def _try_normalize_cn_symbol(symbol: Any) -> Optional[str]:
+    try:
+        return normalize_cn_symbol(str(symbol))
+    except DataContractError:
+        return None

@@ -202,6 +202,22 @@ class TushareProviderTests(unittest.TestCase):
             result.metadata["request_axis"], "full_market_report_period"
         )
 
+    def test_vip_fundamental_marks_nonstandard_vendor_codes_without_guessing(self):
+        class NonstandardVipClient(FakeTushareClient):
+            @staticmethod
+            def income_vip(**kwargs):
+                frame = FakeTushareClient.income(**kwargs)
+                frame["ts_code"] = "X24035.BJ"
+                return frame
+
+        result = TushareProvider(
+            client=NonstandardVipClient()
+        ).fetch_fundamentals_by_period("income", "2024-03-31")
+        row = result.frame.iloc[0]
+        self.assertEqual(row["source_symbol"], "X24035.BJ")
+        self.assertEqual(row["symbol"], "X24035.BJ")
+        self.assertEqual(row["instrument_kind"], "vendor_nonstandard")
+
     def test_empty_fundamental_response_is_a_valid_zero_row_snapshot(self):
         class EmptyIncomeClient(FakeTushareClient):
             @staticmethod
