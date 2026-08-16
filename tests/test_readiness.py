@@ -47,7 +47,16 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
                 "artifact_id": "f1",
                 "schema_version": "p08_fundamental_pit_v1",
                 "identity": {"research_as_of_at": "2026-08-15T00:00:00Z"},
-                "quality": {"promotion_passed": True},
+                "quality": {
+                    "promotion_passed": True,
+                    "symbols": 1,
+                    "statements": {
+                        "income": {},
+                        "balance_sheet": {},
+                        "cashflow": {},
+                        "financial_indicators": {},
+                    },
+                },
                 "outputs": {
                     "version_index": {
                         "path": output.name,
@@ -76,6 +85,8 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
         fundamental_artifact=fundamental,
         industry_membership_path=industry,
         minimum_weekly_periods=1,
+        minimum_fundamental_symbols=1,
+        minimum_industry_instruments=1,
     )
     assert report.passed
     assert all(item["complete"] for item in report.datasets.values())
@@ -87,6 +98,8 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
         "2024-01-03",
         fundamental_artifact=fundamental,
         minimum_weekly_periods=1,
+        minimum_fundamental_symbols=1,
+        minimum_industry_instruments=1,
     )
     assert not missing_industry.passed
     assert (

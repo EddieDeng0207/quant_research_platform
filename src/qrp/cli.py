@@ -241,6 +241,8 @@ def _build_parser() -> argparse.ArgumentParser:
     readiness.add_argument("--fundamental-artifact")
     readiness.add_argument("--industry-membership")
     readiness.add_argument("--minimum-weekly-periods", type=int, default=104)
+    readiness.add_argument("--minimum-fundamental-symbols", type=int, default=200)
+    readiness.add_argument("--minimum-industry-instruments", type=int, default=200)
     readiness.add_argument("--data-root", default="data/lake")
     readiness.add_argument(
         "--output", default="artifacts/audits/latest_research_readiness.json"
@@ -721,6 +723,8 @@ def main(argv: List[str] = None) -> int:
                     else None
                 ),
                 minimum_weekly_periods=args.minimum_weekly_periods,
+                minimum_fundamental_symbols=args.minimum_fundamental_symbols,
+                minimum_industry_instruments=args.minimum_industry_instruments,
             )
             output = write_research_readiness_report(report, Path(args.output))
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))

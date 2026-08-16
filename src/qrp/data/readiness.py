@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional, Sequence
 
 import pandas as pd
 
+from .fundamental_ingestion import FUNDAMENTAL_STATEMENTS
+
 DEFAULT_REQUIRED_DAILY_DATASETS = (
     "daily_bars",
     "adjustment_factors",
@@ -53,14 +55,20 @@ def audit_research_readiness(
     industry_membership_path: Optional[Path] = None,
     required_daily_datasets: Sequence[str] = DEFAULT_REQUIRED_DAILY_DATASETS,
     minimum_weekly_periods: int = 104,
+    minimum_fundamental_symbols: int = 200,
+    minimum_industry_instruments: int = 200,
 ) -> ResearchReadinessReport:
     """Prove complete daily partitions and required PIT research inputs."""
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
     if start > end:
         raise ValueError("start_date must be on or before end_date")
-    if minimum_weekly_periods < 1:
-        raise ValueError("minimum_weekly_periods must be positive")
+    if min(
+        minimum_weekly_periods,
+        minimum_fundamental_symbols,
+        minimum_industry_instruments,
+    ) < 1:
+        raise ValueError("readiness minimums must be positive")
     calendar_file = Path(calendar_path)
     calendar = pd.read_parquet(calendar_file)
     missing_calendar = sorted({"calendar_date", "is_open"} - set(calendar.columns))
@@ -119,9 +127,11 @@ def audit_research_readiness(
             "complete": not missing,
         }
 
-    report.fundamentals = _audit_fundamental_artifact(fundamental_artifact)
+    report.fundamentals = _audit_fundamental_artifact(
+        fundamental_artifact, minimum_fundamental_symbols
+    )
     report.industry_membership = _audit_industry_membership(
-        industry_membership_path, start, end
+        industry_membership_path, start, end, minimum_industry_instruments
     )
     report.hard_failures = {
         "insufficient_weekly_periods": int(weekly_periods < minimum_weekly_periods),
@@ -150,7 +160,9 @@ def write_research_readiness_report(
     return target
 
 
-def _audit_fundamental_artifact(path: Optional[Path]) -> Dict[str, Any]:
+def _audit_fundamental_artifact(
+    path: Optional[Path], minimum_symbols: int
+) -> Dict[str, Any]:
     if path is None:
         return {"ready": False, "reason": "not_provided"}
     root = Path(path)
@@ -164,18 +176,32 @@ def _audit_fundamental_artifact(path: Optional[Path]) -> Dict[str, Any]:
         if not output.exists() or _sha256(output) != metadata["sha256"]:
             output_failures.append(name)
     promoted = bool(manifest.get("quality", {}).get("promotion_passed", False))
+    symbols = int(manifest.get("quality", {}).get("symbols", 0))
+    statements = set(manifest.get("quality", {}).get("statements", {}))
+    missing_statements = sorted(set(FUNDAMENTAL_STATEMENTS) - statements)
     return {
-        "ready": promoted and not output_failures,
+        "ready": (
+            promoted
+            and not output_failures
+            and symbols >= minimum_symbols
+            and not missing_statements
+        ),
         "artifact_id": manifest.get("artifact_id"),
         "schema_version": manifest.get("schema_version"),
         "research_as_of_at": manifest.get("identity", {}).get("research_as_of_at"),
         "output_hash_failures": output_failures,
         "promotion_passed": promoted,
+        "symbols": symbols,
+        "minimum_symbols": minimum_symbols,
+        "missing_statements": missing_statements,
     }
 
 
 def _audit_industry_membership(
-    path: Optional[Path], start: pd.Timestamp, end: pd.Timestamp
+    path: Optional[Path],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    minimum_instruments: int,
 ) -> Dict[str, Any]:
     if path is None:
         return {"ready": False, "reason": "not_provided"}
@@ -208,13 +234,15 @@ def _audit_industry_membership(
             "required": ["decision_at", "or membership_start/membership_end"],
         }
     valid_dates = pd.notna(covered_start) and pd.notna(covered_end)
+    instruments = int(frame["instrument_id"].nunique())
     covers = bool(valid_dates and covered_start <= start and covered_end >= end)
     return {
-        "ready": covers,
+        "ready": covers and instruments >= minimum_instruments,
         "path": str(source),
         "sha256": _sha256(source),
         "rows": len(frame),
-        "instruments": int(frame["instrument_id"].nunique()),
+        "instruments": instruments,
+        "minimum_instruments": minimum_instruments,
         "temporal_contract": temporal_contract,
         "covered_start": str(covered_start.date()) if pd.notna(covered_start) else None,
         "covered_end": str(covered_end.date()) if pd.notna(covered_end) else None,
