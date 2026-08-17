@@ -112,9 +112,7 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
     for quality in stale_manifest["quality"]["statements"].values():
         quality["report_period_end"] = "2016-12-31"
         quality["available_at_end"] = "2017-04-30T01:30:00+00:00"
-    (fundamental / "manifest.json").write_text(
-        json.dumps(stale_manifest), encoding="utf-8"
-    )
+    (fundamental / "manifest.json").write_text(json.dumps(stale_manifest), encoding="utf-8")
     stale_report = audit_research_readiness(
         lake,
         calendar,
@@ -153,9 +151,7 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
     assert not missing_statement_report.passed
     assert missing_statement_report.fundamentals["missing_statements"] == ["income"]
 
-    (fundamental / "manifest.json").write_text(
-        json.dumps(fundamental_manifest), encoding="utf-8"
-    )
+    (fundamental / "manifest.json").write_text(json.dumps(fundamental_manifest), encoding="utf-8")
 
     invalid_namespace = tmp_path / "industry_invalid_namespace.parquet"
     pd.read_parquet(industry).assign(instrument_id="000001.SZ").to_parquet(
@@ -175,6 +171,29 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
     assert not namespace_report.passed
     assert namespace_report.industry_membership["invalid_instrument_namespace_rows"] == 1
 
+    gapped_industry = tmp_path / "industry_gapped.parquet"
+    pd.DataFrame(
+        {
+            "instrument_id": ["CN_EQ:000001.SZ", "CN_EQ:000001.SZ"],
+            "industry_code": ["I1", "I2"],
+            "membership_start": pd.to_datetime(["2020-01-01", "2024-01-02"]),
+            "membership_end": pd.to_datetime(["2023-12-29", "2024-12-31"]),
+        }
+    ).to_parquet(gapped_industry, index=False)
+    gap_report = audit_research_readiness(
+        lake,
+        calendar,
+        "2024-01-02",
+        "2024-01-03",
+        fundamental_artifact=fundamental,
+        industry_membership_path=gapped_industry,
+        minimum_weekly_periods=1,
+        minimum_fundamental_symbols=1,
+        minimum_industry_instruments=1,
+    )
+    assert not gap_report.passed
+    assert gap_report.industry_membership["interval_gap_rows"] == 1
+
     missing_industry = audit_research_readiness(
         lake,
         calendar,
@@ -186,18 +205,11 @@ def test_research_readiness_requires_complete_daily_fundamental_and_industry_inp
         minimum_industry_instruments=1,
     )
     assert not missing_industry.passed
-    assert (
-        missing_industry.hard_failures[
-            "historical_industry_membership_missing_or_failed"
-        ]
-        == 1
-    )
+    assert missing_industry.hard_failures["historical_industry_membership_missing_or_failed"] == 1
 
     empty_statement_manifest = json.loads(json.dumps(fundamental_manifest))
     empty_income = fundamental / "income.parquet"
-    pd.DataFrame({"value": pd.Series(dtype="float64")}).to_parquet(
-        empty_income, index=False
-    )
+    pd.DataFrame({"value": pd.Series(dtype="float64")}).to_parquet(empty_income, index=False)
     empty_statement_manifest["outputs"]["income"].update(
         {
             "sha256": hashlib.sha256(empty_income.read_bytes()).hexdigest(),

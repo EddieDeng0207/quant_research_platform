@@ -112,6 +112,17 @@ raw 层不按 `update_flag` 删除记录，不覆盖原始版，不把今天的�
 
 证券默认身份为 `CN_EQ:{symbol}`。经过审阅的代码变更配置和北交所历史/当前代码映射会
 把两个代码映射到同一个稳定 `instrument_id`；映射文件 SHA-256 进入产物身份。
+代码映射同时分开记录 `legal_continuity` 与 `business_continuity`。前者决定可实现的
+价格/收益率链是否连续；后者决定基本面历史能否直接跨过重组日。存在法律延续但
+业务不延续的重大资产重组时，`price_chain_policy=continuous`，但
+`fundamental_chain_policy=reset_at_effective_date`。因子定义必须声明使用哪条链，
+不得把重组后业务的净资产与重组前业务的价格组合成 BP。
+
+历史申万行业区间只允许桥接同一 `instrument_id` 的相邻记录，且空洞不超过 7 个
+日历日、证券在整个空洞期仍处于上市生命周期。桥接后的 `membership_end` 等于下一条
+`membership_start - 1天`。`bridged_interval_rows` 和剩余 `interval_gap_rows` 进入 manifest；
+未解释的已上市短空洞与区间重叠一样阻断晋级。超过 7 天的空洞不自动粘连，
+避免把真实退出后的重新纳入伪造成连续区间。
 
 ## 决策时点选择
 

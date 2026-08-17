@@ -16,9 +16,11 @@ from qrp.versioning import (
     inspect_git_repository,
 )
 
+from .catalog import load_latest_snapshot
 from .fundamentals import _load_aliases
 
-INDUSTRY_POLICY_VERSION = "p08_shenwan_l1_effective_interval_v2"
+INDUSTRY_POLICY_VERSION = "p08_shenwan_l1_effective_interval_v3"
+MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS = 7
 TAXONOMY_WINDOWS = {
     "SW2014": (None, pd.Timestamp("2021-12-12")),
     "SW2021": (pd.Timestamp("2021-12-13"), None),
@@ -72,8 +74,7 @@ def build_historical_industry_artifact(
     if not categories:
         raise IndustryPITError("industry checkpoint contains no frozen categories")
     expected = {
-        f"industry_membership:{item['taxonomy']}:{item['source_index_code']}"
-        for item in categories
+        f"industry_membership:{item['taxonomy']}:{item['source_index_code']}" for item in categories
     }
     completed = state.get("completed", {})
     missing = sorted(expected - set(completed))
@@ -110,13 +111,22 @@ def build_historical_industry_artifact(
                 "written_at": entry["written_at"],
             }
         )
-    aliases, alias_identity = _load_aliases(
-        aliases_path, security_code_mappings_path
+    aliases, alias_identity = _load_aliases(aliases_path, security_code_mappings_path)
+    instruments_snapshot = load_latest_snapshot(lake, "tushare", "instruments")
+    lifecycle = _curate_instrument_lifecycle(instruments_snapshot.frame, aliases)
+    membership = _curate_membership(pd.concat(frames, ignore_index=True), start, end, aliases)
+    membership, interval_bridge = _bridge_short_membership_gaps(
+        membership,
+        lifecycle,
+        maximum_gap_calendar_days=MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS,
     )
-    membership = _curate_membership(
-        pd.concat(frames, ignore_index=True), start, end, aliases
+    hard_failures = _quality_failures(
+        membership,
+        start,
+        end,
+        lifecycle,
+        maximum_gap_calendar_days=MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS,
     )
-    hard_failures = _quality_failures(membership, start, end)
     quality = {
         "rows": len(membership),
         "instruments": int(membership["instrument_id"].nunique()),
@@ -126,6 +136,7 @@ def build_historical_industry_artifact(
         },
         "covered_start": _date_or_none(membership["membership_start"], "min"),
         "covered_end": _date_or_none(membership["membership_end"], "max"),
+        "interval_bridge": interval_bridge,
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
     }
@@ -139,7 +150,7 @@ def build_historical_industry_artifact(
         if require_clean_git:
             raise
     identity = {
-        "schema_version": "p08_historical_industry_v2",
+        "schema_version": "p08_historical_industry_v3",
         "policy_version": INDUSTRY_POLICY_VERSION,
         "start_date": str(start.date()),
         "end_date": str(end.date()),
@@ -153,16 +164,20 @@ def build_historical_industry_artifact(
         "run_manifest_sha256": _sha256(run_manifest_path),
         "config_sha256": _sha256(config_path),
         "checkpoint_sha256": _sha256(checkpoint_path),
-        "raw_inputs": [
-            {"path": item["path"], "sha256": item["sha256"]} for item in raw_inputs
-        ],
+        "raw_inputs": [{"path": item["path"], "sha256": item["sha256"]} for item in raw_inputs],
+        "instrument_lifecycle_snapshot": {
+            "fingerprint": instruments_snapshot.fingerprint,
+            "inputs": [
+                {"path": item["path"], "sha256": item["sha256"]}
+                for item in instruments_snapshot.manifest_entries
+            ],
+        },
         "aliases": alias_identity,
         "implementation_sha256": _implementation_sha256(),
         "git_commit": code_identity["commit"] if code_identity else None,
         "git_tree": code_identity["tree"] if code_identity else None,
-        "environment_lock_sha256": (
-            environment_lock["sha256"] if environment_lock else None
-        ),
+        "git_dirty_state_sha256": (code_identity["dirty_state_sha256"] if code_identity else None),
+        "environment_lock_sha256": (environment_lock["sha256"] if environment_lock else None),
     }
     artifact_id = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -175,17 +190,33 @@ def build_historical_industry_artifact(
         output,
         ["instrument_id", "membership_start", "taxonomy", "industry_code"],
     )
+    lifecycle_output = destination / "instrument_lifecycle.parquet"
+    _write_immutable_parquet(
+        lifecycle,
+        lifecycle_output,
+        ["instrument_id"],
+    )
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p08_historical_industry_v2",
+        "schema_version": "p08_historical_industry_v3",
         "identity": identity,
-        "inputs": {"run": str(run), "lake_root": str(lake), "raw": raw_inputs},
+        "inputs": {
+            "run": str(run),
+            "lake_root": str(lake),
+            "raw": raw_inputs,
+            "instrument_lifecycle": instruments_snapshot.manifest_entries,
+        },
         "outputs": {
             "membership": {
                 "path": output.name,
                 "sha256": _sha256(output),
                 "rows": len(membership),
-            }
+            },
+            "instrument_lifecycle": {
+                "path": lifecycle_output.name,
+                "sha256": _sha256(lifecycle_output),
+                "rows": len(lifecycle),
+            },
         },
         "quality": quality,
         "code_identity": code_identity,
@@ -194,13 +225,19 @@ def build_historical_industry_artifact(
             "taxonomy_revision_not_backfilled": True,
             "sw2014_used_through_2021_12_12": True,
             "sw2021_used_from_2021_12_13": True,
-            "source_intervals_preserved": True,
+            "source_intervals_preserved_unless_audited_short_gap_bridge": True,
             "source_out_date_treated_as_exclusive": True,
+            "short_interval_gaps_bridged_only_while_listed": True,
+            "maximum_bridge_gap_calendar_days": MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS,
             "overlapping_instrument_intervals_forbidden": True,
+            "unresolved_listed_short_interval_gaps_forbidden": True,
             "stable_instrument_identity_mapping": True,
             "cn_equity_namespace_enforced": True,
             "raw_inputs_hash_verified": True,
             "git_commit_bound": code_identity is not None,
+            "git_dirty_state_bound": bool(
+                code_identity and code_identity.get("dirty_state_sha256")
+            ),
         },
     }
     _write_immutable_json(manifest, destination / "manifest.json")
@@ -218,11 +255,14 @@ def select_industry_as_of(frame: pd.DataFrame, decision_at: Any) -> pd.DataFrame
     if missing:
         raise IndustryPITError(f"industry frame missing columns: {missing}")
     local_date = (
-        pd.Timestamp(decision_at)
-        .tz_localize("Asia/Shanghai")
-        if pd.Timestamp(decision_at).tzinfo is None
-        else pd.Timestamp(decision_at).tz_convert("Asia/Shanghai")
-    ).normalize().tz_localize(None)
+        (
+            pd.Timestamp(decision_at).tz_localize("Asia/Shanghai")
+            if pd.Timestamp(decision_at).tzinfo is None
+            else pd.Timestamp(decision_at).tz_convert("Asia/Shanghai")
+        )
+        .normalize()
+        .tz_localize(None)
+    )
     work = frame.copy()
     starts = pd.to_datetime(work["membership_start"], errors="coerce").dt.normalize()
     ends = pd.to_datetime(work["membership_end"], errors="coerce").dt.normalize()
@@ -264,13 +304,13 @@ def _curate_membership(
     result["source_membership_end"] = pd.to_datetime(
         result["source_membership_end"], errors="coerce"
     ).dt.normalize()
-    result["source_ingested_at"] = pd.to_datetime(
-        result["ingested_at"], utc=True, errors="coerce"
-    )
+    result["source_ingested_at"] = pd.to_datetime(result["ingested_at"], utc=True, errors="coerce")
     if result[["source_membership_start", "source_ingested_at"]].isna().any(axis=None):
         raise IndustryPITError("industry raw rows contain invalid temporal fields")
-    result["instrument_id"] = result["symbol"].astype("string").map(
-        lambda symbol: aliases.get(str(symbol), f"CN_EQ:{symbol}")
+    result["instrument_id"] = (
+        result["symbol"]
+        .astype("string")
+        .map(lambda symbol: aliases.get(str(symbol), f"CN_EQ:{symbol}"))
     )
     result["identity_alias_resolved"] = result["symbol"].astype(str).isin(aliases)
     starts = []
@@ -288,15 +328,18 @@ def _curate_membership(
             else end
         )
         membership_end = min(
-            value
-            for value in (source_end_inclusive, end, window_end)
-            if value is not None
+            value for value in (source_end_inclusive, end, window_end) if value is not None
         )
         starts.append(membership_start)
         ends.append(membership_end)
     result["membership_start"] = starts
     result["membership_end"] = ends
     result = result.loc[result["membership_start"].le(result["membership_end"])].copy()
+    return _assign_membership_ids(result)
+
+
+def _assign_membership_ids(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
     result["membership_id"] = result.apply(
         lambda row: hashlib.sha256(
             "|".join(
@@ -315,8 +358,150 @@ def _curate_membership(
     return result.drop_duplicates("membership_id").reset_index(drop=True)
 
 
+def _curate_instrument_lifecycle(
+    instruments: pd.DataFrame,
+    aliases: Dict[str, str],
+) -> pd.DataFrame:
+    required = {"symbol", "list_date", "delist_date"}
+    missing = sorted(required - set(instruments.columns))
+    if missing:
+        raise IndustryPITError(f"instrument lifecycle snapshot missing columns: {missing}")
+    work = instruments.copy()
+    if "instrument_kind" in work:
+        work = work.loc[work["instrument_kind"].eq("stock")].copy()
+    work["instrument_id"] = (
+        work["symbol"]
+        .astype("string")
+        .map(lambda symbol: aliases.get(str(symbol), f"CN_EQ:{symbol}"))
+    )
+    work["listed_from"] = pd.to_datetime(work["list_date"], errors="coerce").dt.normalize()
+    work["listed_through"] = pd.to_datetime(work["delist_date"], errors="coerce").dt.normalize()
+    if work["listed_from"].isna().any():
+        sample = work.loc[work["listed_from"].isna(), "symbol"].head(5).tolist()
+        raise IndustryPITError(f"instrument lifecycle has invalid list dates: {sample}")
+    records = []
+    for instrument_id, group in work.groupby("instrument_id", sort=True):
+        listed_through = (
+            pd.NaT if group["listed_through"].isna().any() else group["listed_through"].max()
+        )
+        records.append(
+            {
+                "instrument_id": instrument_id,
+                "listed_from": group["listed_from"].min(),
+                "listed_through": listed_through,
+                "source_symbols": " | ".join(sorted(group["symbol"].astype(str).unique())),
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def _bridge_short_membership_gaps(
+    frame: pd.DataFrame,
+    lifecycle: pd.DataFrame,
+    *,
+    maximum_gap_calendar_days: int,
+) -> tuple[pd.DataFrame, Dict[str, int]]:
+    if maximum_gap_calendar_days < 1:
+        raise ValueError("maximum_gap_calendar_days must be positive")
+    result = frame.sort_values(
+        ["instrument_id", "membership_start", "membership_end", "membership_id"]
+    ).reset_index(drop=True)
+    lifecycle_by_id = lifecycle.set_index("instrument_id")
+    adjacent_gap_rows = 0
+    short_gap_rows = 0
+    unverified_short_gap_rows = 0
+    bridged_interval_rows = 0
+    bridged_calendar_days = 0
+    long_gap_rows = 0
+    previous_index: Optional[int] = None
+    previous_instrument: Optional[str] = None
+    for index, row in result.iterrows():
+        instrument_id = str(row["instrument_id"])
+        if previous_index is None or previous_instrument != instrument_id:
+            previous_index = index
+            previous_instrument = instrument_id
+            continue
+        previous_end = pd.Timestamp(result.at[previous_index, "membership_end"])
+        next_start = pd.Timestamp(row["membership_start"])
+        gap_days = int((next_start - previous_end).days - 1)
+        if gap_days <= 0:
+            previous_index = index
+            continue
+        adjacent_gap_rows += 1
+        if gap_days > maximum_gap_calendar_days:
+            long_gap_rows += 1
+            previous_index = index
+            continue
+        short_gap_rows += 1
+        if instrument_id not in lifecycle_by_id.index:
+            unverified_short_gap_rows += 1
+            previous_index = index
+            continue
+        instrument = lifecycle_by_id.loc[instrument_id]
+        gap_start = previous_end + pd.Timedelta(days=1)
+        gap_end = next_start - pd.Timedelta(days=1)
+        listed_from = pd.Timestamp(instrument["listed_from"])
+        listed_through = instrument["listed_through"]
+        remained_listed = listed_from <= gap_start and (
+            pd.isna(listed_through) or pd.Timestamp(listed_through) >= gap_end
+        )
+        if remained_listed:
+            result.at[previous_index, "membership_end"] = gap_end
+            bridged_interval_rows += 1
+            bridged_calendar_days += gap_days
+        previous_index = index
+    result = _assign_membership_ids(result.drop(columns="membership_id"))
+    remaining = _listed_short_interval_gaps(
+        result,
+        lifecycle,
+        maximum_gap_calendar_days=maximum_gap_calendar_days,
+    )
+    return result, {
+        "maximum_gap_calendar_days": maximum_gap_calendar_days,
+        "adjacent_interval_gap_rows_before_bridge": adjacent_gap_rows,
+        "short_interval_gap_rows_before_bridge": short_gap_rows,
+        "long_interval_gap_rows_not_bridgeable": long_gap_rows,
+        "bridged_interval_rows": bridged_interval_rows,
+        "bridged_calendar_days": bridged_calendar_days,
+        "unverified_short_interval_gap_rows": unverified_short_gap_rows,
+        "interval_gap_rows": remaining,
+    }
+
+
+def _listed_short_interval_gaps(
+    frame: pd.DataFrame,
+    lifecycle: pd.DataFrame,
+    *,
+    maximum_gap_calendar_days: int,
+) -> int:
+    ordered = frame.sort_values(["instrument_id", "membership_start", "membership_end"])
+    previous_end = ordered.groupby("instrument_id")["membership_end"].shift()
+    gap_days = (ordered["membership_start"] - previous_end).dt.days - 1
+    short_gap = previous_end.notna() & gap_days.between(1, maximum_gap_calendar_days)
+    if not short_gap.any():
+        return 0
+    candidates = ordered.loc[short_gap, ["instrument_id", "membership_start"]].copy()
+    candidates["gap_start"] = previous_end.loc[short_gap] + pd.Timedelta(days=1)
+    candidates["gap_end"] = candidates["membership_start"] - pd.Timedelta(days=1)
+    candidates = candidates.merge(lifecycle, on="instrument_id", how="left")
+    listed = (
+        candidates["listed_from"].notna()
+        & candidates["listed_from"].le(candidates["gap_start"])
+        & (
+            candidates["listed_through"].isna()
+            | candidates["listed_through"].ge(candidates["gap_end"])
+        )
+    )
+    return int(listed.sum())
+
+
 def _quality_failures(
-    frame: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+    frame: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    lifecycle: pd.DataFrame,
+    *,
+    maximum_gap_calendar_days: int,
 ) -> Dict[str, int]:
     ordered = frame.sort_values(["instrument_id", "membership_start", "membership_end"])
     previous_end = ordered.groupby("instrument_id")["membership_end"].shift()
@@ -325,6 +510,11 @@ def _quality_failures(
         "duplicate_membership_ids": int(frame.duplicated("membership_id").sum()),
         "invalid_intervals": int(frame["membership_start"].gt(frame["membership_end"]).sum()),
         "overlapping_instrument_intervals": int(overlaps.sum()),
+        "interval_gap_rows": _listed_short_interval_gaps(
+            frame,
+            lifecycle,
+            maximum_gap_calendar_days=maximum_gap_calendar_days,
+        ),
         "unexpected_taxonomies": int((~frame["taxonomy"].isin(TAXONOMY_WINDOWS)).sum()),
         "non_l1_rows": int((~frame["industry_level"].eq("L1")).sum()),
         "invalid_instrument_namespace_rows": int(
@@ -347,9 +537,7 @@ def _lake_manifest_by_path(lake: Path) -> Dict[str, Dict[str, Any]]:
     return entries
 
 
-def _write_immutable_parquet(
-    frame: pd.DataFrame, path: Path, sort_columns: list[str]
-) -> None:
+def _write_immutable_parquet(frame: pd.DataFrame, path: Path, sort_columns: list[str]) -> None:
     ordered = frame.sort_values(sort_columns).reset_index(drop=True)
     temporary = path.parent / f".{path.name}.tmp"
     ordered.to_parquet(temporary, index=False)
@@ -381,6 +569,7 @@ def _implementation_sha256() -> str:
         [
             Path(__file__),
             Path(__file__).with_name("industry_ingestion.py"),
+            Path(__file__).with_name("catalog.py"),
             Path(__file__).with_name("fundamentals.py"),
             Path(__file__).with_name("contracts.py"),
             Path(__file__).parent / "providers" / "tushare.py",

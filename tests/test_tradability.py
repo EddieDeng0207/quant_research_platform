@@ -85,9 +85,7 @@ def test_matrix_blocks_suspension_and_limit_up_without_zeroing_valuation():
 
 
 def test_unexplained_missing_bar_fails_promotion_instead_of_becoming_suspension():
-    matrix = build_tradability_matrix(
-        *_inputs(include_unknown=True), trading_dates=["2024-01-02"]
-    )
+    matrix = build_tradability_matrix(*_inputs(include_unknown=True), trading_dates=["2024-01-02"])
     unknown = matrix.set_index("symbol").loc["000004.SZ"]
     quality = tradability_quality_summary(matrix)
     assert unknown["unexplained_missing_bar"]
@@ -124,7 +122,7 @@ def test_reviewed_symbol_alias_preserves_historical_code_and_stable_identity():
             "high": [10.5, 10.5],
             "low": [9.8, 9.8],
             "close": [10.2, 10.2],
-            "pre_close": [10.0, 10.0],
+            "pre_close": [pd.NA, 10.0],
             "volume": [1000.0, 1000.0],
             "amount": [10200.0, 10200.0],
         }
@@ -144,14 +142,17 @@ def test_reviewed_symbol_alias_preserves_historical_code_and_stable_identity():
             "historical_symbol": "300114.SZ",
             "effective_date": "2025-02-17",
             "stable_instrument_id": "CN_EQ:AVIC_CAC_20100827",
+            "legal_continuity": True,
+            "business_continuity": False,
+            "price_chain_policy": "continuous",
+            "fundamental_chain_policy": "reset_at_effective_date",
+            "evidence": "https://example.test/reviewed-announcement.pdf",
         }
     ]
     matrix = build_tradability_matrix(
         bars,
         limits,
-        pd.DataFrame(
-            columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]
-        ),
+        pd.DataFrame(columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]),
         pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
         instruments,
         ["2024-01-02"],
@@ -163,6 +164,7 @@ def test_reviewed_symbol_alias_preserves_historical_code_and_stable_identity():
     assert row["source_bar_symbol"] == "300114.SZ | 302132.SZ"
     assert row["instrument_id"] == "CN_EQ:AVIC_CAC_20100827"
     assert row["identity_alias_resolved"]
+    assert row["limit_pre_close"] == 10.0
 
 
 def test_bse_mapping_restores_historical_code_in_universe_and_market_data():
@@ -218,9 +220,7 @@ def test_bse_mapping_restores_historical_code_in_universe_and_market_data():
     matrix = build_tradability_matrix(
         bars,
         limits,
-        pd.DataFrame(
-            columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]
-        ),
+        pd.DataFrame(columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]),
         pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
         instruments,
         ["2024-01-05"],
@@ -235,6 +235,71 @@ def test_bse_mapping_restores_historical_code_in_universe_and_market_data():
     assert row["identity_alias_resolved"]
     assert row["identity_alias_policy_version"] == "bse_920_transition_v1"
     assert row["universe_source"] == "reviewed_bse_mapping_master_supplement"
+
+
+def test_pre_bse_neeq_bar_does_not_expand_a_share_universe_backwards():
+    instruments = pd.DataFrame(
+        {
+            "symbol": ["920690.BJ", "000001.SZ"],
+            "name": ["测试北证", "测试深证"],
+            "exchange": ["BSE", "SZSE"],
+            "list_status": ["L", "L"],
+            "list_date": ["2024-01-05", "2020-01-01"],
+            "delist_date": [pd.NaT, pd.NaT],
+        }
+    )
+    history = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2023-01-05"],
+            "name": ["测试深证"],
+            "list_date": ["2020-01-01"],
+        }
+    )
+    bars = pd.DataFrame(
+        {
+            "symbol": ["920690.BJ", "000001.SZ"],
+            "trade_date": ["2023-01-05", "2023-01-05"],
+            "open": [10.0, 10.0],
+            "high": [10.5, 10.5],
+            "low": [9.8, 9.8],
+            "close": [10.2, 10.2],
+            "pre_close": [10.0, 10.0],
+            "volume": [1000.0, 1000.0],
+            "amount": [10200.0, 10200.0],
+        }
+    )
+    mappings = pd.DataFrame(
+        {
+            "historical_symbol": ["873690.BJ"],
+            "current_symbol": ["920690.BJ"],
+            "name": ["测试北证"],
+            "list_date": ["2024-01-05"],
+        }
+    )
+    matrix = build_tradability_matrix(
+        bars,
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ"],
+                "trade_date": ["2023-01-05"],
+                "pre_close": [10.0],
+                "up_limit": [11.0],
+                "down_limit": [9.0],
+            }
+        ),
+        pd.DataFrame(columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]),
+        pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
+        instruments,
+        ["2023-01-05"],
+        historical_instruments=history,
+        security_code_mappings=mappings,
+    )
+
+    assert set(matrix["symbol"]) == {"000001.SZ"}
+    quality = tradability_quality_summary(matrix)
+    assert quality["pre_bse_listing_bar_rows_excluded"] == 1
+    assert quality["promotion_passed"]
 
 
 def test_listing_day_bar_can_repair_a_bounded_historical_master_gap():
@@ -282,9 +347,7 @@ def test_listing_day_bar_can_repair_a_bounded_historical_master_gap():
     matrix = build_tradability_matrix(
         bars,
         limits,
-        pd.DataFrame(
-            columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]
-        ),
+        pd.DataFrame(columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]),
         pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
         instruments,
         ["2023-02-08"],
@@ -292,4 +355,4 @@ def test_listing_day_bar_can_repair_a_bounded_historical_master_gap():
     )
     row = matrix.set_index("symbol").loc["301260.SZ"]
     assert row["has_bar"]
-    assert row["universe_source"].endswith("ipo_listing_day")
+    assert row["universe_source"].endswith("current_master_lifecycle_validated_observed_bar")

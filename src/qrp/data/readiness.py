@@ -11,6 +11,10 @@ from typing import Any, Dict, Optional, Sequence
 import pandas as pd
 
 from .fundamental_ingestion import FUNDAMENTAL_STATEMENTS
+from .industry import (
+    MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS,
+    _listed_short_interval_gaps,
+)
 
 DEFAULT_REQUIRED_DAILY_DATASETS = (
     "daily_bars",
@@ -59,25 +63,24 @@ def audit_research_readiness(
     minimum_weekly_periods: int = 104,
     minimum_fundamental_symbols: int = 200,
     minimum_industry_instruments: int = 200,
-    maximum_report_period_staleness_days: int = (
-        DEFAULT_MAXIMUM_REPORT_PERIOD_STALENESS_DAYS
-    ),
-    maximum_availability_staleness_days: int = (
-        DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS
-    ),
+    maximum_report_period_staleness_days: int = (DEFAULT_MAXIMUM_REPORT_PERIOD_STALENESS_DAYS),
+    maximum_availability_staleness_days: int = (DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS),
 ) -> ResearchReadinessReport:
     """Prove complete daily partitions and required PIT research inputs."""
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
     if start > end:
         raise ValueError("start_date must be on or before end_date")
-    if min(
-        minimum_weekly_periods,
-        minimum_fundamental_symbols,
-        minimum_industry_instruments,
-        maximum_report_period_staleness_days,
-        maximum_availability_staleness_days,
-    ) < 1:
+    if (
+        min(
+            minimum_weekly_periods,
+            minimum_fundamental_symbols,
+            minimum_industry_instruments,
+            maximum_report_period_staleness_days,
+            maximum_availability_staleness_days,
+        )
+        < 1
+    ):
         raise ValueError("readiness minimums must be positive")
     calendar_file = Path(calendar_path)
     calendar = pd.read_parquet(calendar_file)
@@ -85,14 +88,14 @@ def audit_research_readiness(
     if missing_calendar:
         raise ValueError(f"calendar missing columns: {missing_calendar}")
     dates = pd.to_datetime(calendar["calendar_date"], errors="coerce").dt.normalize()
-    open_dates = pd.DatetimeIndex(
-        dates.loc[calendar["is_open"].astype(bool) & dates.between(start, end)]
-    ).unique().sort_values()
+    open_dates = (
+        pd.DatetimeIndex(dates.loc[calendar["is_open"].astype(bool) & dates.between(start, end)])
+        .unique()
+        .sort_values()
+    )
     if open_dates.empty:
         raise ValueError("calendar contains no open sessions in the requested range")
-    weekly_periods = int(
-        pd.Series(open_dates).dt.to_period("W-FRI").nunique()
-    )
+    weekly_periods = int(pd.Series(open_dates).dt.to_period("W-FRI").nunique())
     report = ResearchReadinessReport(
         start_date=str(start.date()),
         end_date=str(end.date()),
@@ -102,9 +105,7 @@ def audit_research_readiness(
     )
     manifest_path = Path(lake_root) / "manifest.jsonl"
     entries = [
-        json.loads(line)
-        for line in manifest_path.read_text(encoding="utf-8").splitlines()
-        if line
+        json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line
     ]
     missing_partition_total = 0
     expected = {str(value.date()) for value in open_dates}
@@ -151,9 +152,7 @@ def audit_research_readiness(
     report.hard_failures = {
         "insufficient_weekly_periods": int(weekly_periods < minimum_weekly_periods),
         "missing_daily_partitions": missing_partition_total,
-        "fundamental_artifact_missing_or_failed": int(
-            not report.fundamentals.get("ready", False)
-        ),
+        "fundamental_artifact_missing_or_failed": int(not report.fundamentals.get("ready", False)),
         "historical_industry_membership_missing_or_failed": int(
             not report.industry_membership.get("ready", False)
         ),
@@ -161,14 +160,13 @@ def audit_research_readiness(
     return report
 
 
-def write_research_readiness_report(
-    report: ResearchReadinessReport, path: Path
-) -> Path:
+def write_research_readiness_report(report: ResearchReadinessReport, path: Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(
-        report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, default=str
-    ) + "\n"
+    payload = (
+        json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        + "\n"
+    )
     temporary = target.parent / f".{target.name}.tmp"
     temporary.write_text(payload, encoding="utf-8")
     temporary.replace(target)
@@ -277,12 +275,8 @@ def _audit_fundamental_artifact(
         "missing_statements": missing_statements,
         "empty_statements": empty_statements,
         "statement_row_count_mismatches": statement_row_count_mismatches,
-        "maximum_report_period_staleness_days": (
-            maximum_report_period_staleness_days
-        ),
-        "maximum_availability_staleness_days": (
-            maximum_availability_staleness_days
-        ),
+        "maximum_report_period_staleness_days": (maximum_report_period_staleness_days),
+        "maximum_availability_staleness_days": (maximum_availability_staleness_days),
         "statements_outside_requested_interval": statements_outside_requested_interval,
         "statement_coverage": statement_coverage,
     }
@@ -309,6 +303,8 @@ def _audit_industry_membership(
     frame = pd.read_parquet(source)
     artifact_hash_valid = True
     artifact_promoted = True
+    lifecycle_hash_valid = True
+    lifecycle = None
     if artifact_manifest is not None:
         output = artifact_manifest.get("outputs", {}).get("membership", {})
         artifact_hash_valid = (
@@ -319,6 +315,22 @@ def _audit_industry_membership(
         artifact_promoted = bool(
             artifact_manifest.get("quality", {}).get("promotion_passed", False)
         )
+        lifecycle_output = artifact_manifest.get("outputs", {}).get("instrument_lifecycle", {})
+        lifecycle_path = source.parent / str(lifecycle_output.get("path", ""))
+        lifecycle_hash_valid = bool(
+            lifecycle_output
+            and lifecycle_path.is_file()
+            and lifecycle_output.get("sha256") == _sha256(lifecycle_path)
+        )
+        if lifecycle_hash_valid:
+            lifecycle = pd.read_parquet(lifecycle_path)
+            lifecycle_hash_valid = int(lifecycle_output.get("rows", -1)) == len(lifecycle) and {
+                "instrument_id",
+                "listed_from",
+                "listed_through",
+            }.issubset(lifecycle.columns)
+            if not lifecycle_hash_valid:
+                lifecycle = None
     base_required = {"instrument_id", "industry_code"}
     missing = sorted(base_required - set(frame.columns))
     if missing:
@@ -345,12 +357,11 @@ def _audit_industry_membership(
         }
     valid_dates = pd.notna(covered_start) and pd.notna(covered_end)
     instruments = int(frame["instrument_id"].nunique())
-    valid_namespace = frame["instrument_id"].astype("string").str.startswith(
-        "CN_EQ:", na=False
-    )
+    valid_namespace = frame["instrument_id"].astype("string").str.startswith("CN_EQ:", na=False)
     invalid_instrument_namespace_rows = int((~valid_namespace).sum())
     covers = bool(valid_dates and covered_start <= start and covered_end >= end)
     overlapping_intervals = 0
+    interval_gap_rows = 0
     if temporal_contract == "effective_interval":
         ordered = frame.assign(
             _start=pd.to_datetime(frame["membership_start"], errors="coerce"),
@@ -360,13 +371,31 @@ def _audit_industry_membership(
         overlapping_intervals = int(
             (previous_end.notna() & ordered["_start"].le(previous_end)).sum()
         )
+        if lifecycle is None:
+            lifecycle = pd.DataFrame(
+                {
+                    "instrument_id": frame["instrument_id"].drop_duplicates(),
+                    "listed_from": pd.Timestamp.min,
+                    "listed_through": pd.NaT,
+                }
+            )
+        interval_gap_rows = _listed_short_interval_gaps(
+            frame.assign(
+                membership_start=pd.to_datetime(frame["membership_start"], errors="coerce"),
+                membership_end=pd.to_datetime(frame["membership_end"], errors="coerce"),
+            ),
+            lifecycle,
+            maximum_gap_calendar_days=MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS,
+        )
     return {
         "ready": (
             covers
             and instruments >= minimum_instruments
             and artifact_hash_valid
+            and lifecycle_hash_valid
             and artifact_promoted
             and overlapping_intervals == 0
+            and interval_gap_rows == 0
             and invalid_instrument_namespace_rows == 0
         ),
         "path": str(source),
@@ -378,8 +407,11 @@ def _audit_industry_membership(
         "covered_start": str(covered_start.date()) if pd.notna(covered_start) else None,
         "covered_end": str(covered_end.date()) if pd.notna(covered_end) else None,
         "artifact_hash_valid": artifact_hash_valid,
+        "lifecycle_hash_valid": lifecycle_hash_valid,
         "artifact_promoted": artifact_promoted,
         "overlapping_intervals": overlapping_intervals,
+        "interval_gap_rows": interval_gap_rows,
+        "maximum_bridge_gap_calendar_days": MAXIMUM_BRIDGE_GAP_CALENDAR_DAYS,
         "invalid_instrument_namespace_rows": invalid_instrument_namespace_rows,
     }
 

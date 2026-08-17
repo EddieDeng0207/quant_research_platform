@@ -88,9 +88,7 @@ def build_fundamental_pit_artifact(
 
     cells = periods if period_mode else symbols
     expected_tasks = {
-        f"fundamentals_{statement}:{cell}"
-        for statement in statements
-        for cell in cells
+        f"fundamentals_{statement}:{cell}" for statement in statements for cell in cells
     }
     completed = state.get("completed", {})
     missing_tasks = sorted(expected_tasks - set(completed))
@@ -102,9 +100,7 @@ def build_fundamental_pit_artifact(
     manifest_entries = _lake_manifest_by_path(lake)
     cutoff = _utc_timestamp(as_of_ingested_at) if as_of_ingested_at else None
     raw_inputs: list[Dict[str, Any]] = []
-    frames_by_statement: Dict[str, list[pd.DataFrame]] = {
-        statement: [] for statement in statements
-    }
+    frames_by_statement: Dict[str, list[pd.DataFrame]] = {statement: [] for statement in statements}
     zero_row_tasks = 0
     excluded_nonstandard_financial_rows = 0
     excluded_missing_knowledge_time_rows = 0
@@ -124,9 +120,7 @@ def build_fundamental_pit_artifact(
             raise FundamentalPITError(f"raw input is absent from lake manifest: {relative}")
         written_at = _utc_timestamp(entry["written_at"])
         if cutoff is not None and written_at > cutoff:
-            raise FundamentalPITError(
-                f"raw input {relative} was written after as_of_ingested_at"
-            )
+            raise FundamentalPITError(f"raw input {relative} was written after as_of_ingested_at")
         if _sha256(raw_path) != entry.get("sha256"):
             raise FundamentalPITError(f"raw input hash mismatch: {raw_path}")
         statement = task_id.split(":", 1)[0].removeprefix("fundamentals_")
@@ -175,9 +169,7 @@ def build_fundamental_pit_artifact(
 
     calendar = pd.read_parquet(calendar_file)
     _validate_calendar(calendar)
-    aliases, alias_identity = _load_aliases(
-        aliases_path, security_code_mappings_path
-    )
+    aliases, alias_identity = _load_aliases(aliases_path, security_code_mappings_path)
     curated: Dict[str, pd.DataFrame] = {}
     indexes = []
     hard_failures = {
@@ -203,18 +195,14 @@ def build_fundamental_pit_artifact(
         curated[statement] = frame
         if not frame.empty:
             indexes.append(_version_index(frame))
-            hard_failures["duplicate_version_ids"] += int(
-                frame.duplicated("version_id").sum()
-            )
+            hard_failures["duplicate_version_ids"] += int(frame.duplicated("version_id").sum())
             hard_failures["announcement_after_availability_rows"] += int(
                 (frame["announcement_at"] > frame["available_at"]).sum()
             )
             hard_failures["source_ingested_after_research_as_of_rows"] += int(
                 (frame["source_ingested_at"] > research_as_of_at).sum()
             )
-            hard_failures["invalid_report_period_rows"] += int(
-                frame["report_period"].isna().sum()
-            )
+            hard_failures["invalid_report_period_rows"] += int(frame["report_period"].isna().sum())
         statement_quality[statement] = {
             "rows": len(frame),
             "symbols_with_rows": int(frame["symbol"].nunique()) if not frame.empty else 0,
@@ -224,14 +212,10 @@ def build_fundamental_pit_artifact(
             "available_at_end": _timestamp_or_none(frame.get("available_at"), "max"),
         }
     version_index = (
-        pd.concat(indexes, ignore_index=True)
-        if indexes
-        else pd.DataFrame(columns=INDEX_COLUMNS)
+        pd.concat(indexes, ignore_index=True) if indexes else pd.DataFrame(columns=INDEX_COLUMNS)
     )
     if not version_index.empty and version_index.duplicated("version_id").any():
-        hard_failures["duplicate_version_ids"] = int(
-            version_index.duplicated("version_id").sum()
-        )
+        hard_failures["duplicate_version_ids"] = int(version_index.duplicated("version_id").sum())
     quality = {
         "expected_statement_tasks": len(expected_tasks),
         "captured_statement_tasks": len(raw_inputs),
@@ -239,9 +223,7 @@ def build_fundamental_pit_artifact(
         "symbols": len(symbols),
         "request_axis": "report_period" if period_mode else "symbol",
         "report_periods": len(periods) if period_mode else None,
-        "excluded_legacy_instruments": len(
-            state.get("excluded_legacy_instruments", [])
-        ),
+        "excluded_legacy_instruments": len(state.get("excluded_legacy_instruments", [])),
         "excluded_nonstandard_financial_rows": excluded_nonstandard_financial_rows,
         "excluded_missing_knowledge_time_rows": excluded_missing_knowledge_time_rows,
         "statements": statement_quality,
@@ -266,20 +248,13 @@ def build_fundamental_pit_artifact(
         "checkpoint_sha256": _sha256(checkpoint_path),
         "calendar_sha256": _sha256(calendar_file),
         "research_as_of_at": research_as_of_at.isoformat(),
-        "raw_inputs": [
-            {"path": item["path"], "sha256": item["sha256"]}
-            for item in raw_inputs
-        ],
+        "raw_inputs": [{"path": item["path"], "sha256": item["sha256"]} for item in raw_inputs],
         "aliases": alias_identity,
         "implementation_sha256": implementation["tree_sha256"],
         "git_commit": code_identity["commit"] if code_identity else None,
         "git_tree": code_identity["tree"] if code_identity else None,
-        "git_dirty_state_sha256": (
-            code_identity["dirty_state_sha256"] if code_identity else None
-        ),
-        "environment_lock_sha256": (
-            environment_lock["sha256"] if environment_lock else None
-        ),
+        "git_dirty_state_sha256": (code_identity["dirty_state_sha256"] if code_identity else None),
+        "environment_lock_sha256": (environment_lock["sha256"] if environment_lock else None),
     }
     artifact_id = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -373,14 +348,9 @@ def select_fundamentals_as_of(
     if work[["available_at", "source_ingested_at", "report_period"]].isna().any(axis=None):
         raise FundamentalPITError("fundamental frame contains invalid PIT timestamps")
     work = work.loc[
-        (work["available_at"] <= decision)
-        & (work["source_ingested_at"] <= research_as_of)
+        (work["available_at"] <= decision) & (work["source_ingested_at"] <= research_as_of)
     ].copy()
-    if (
-        report_types is not None
-        and "report_type" in work
-        and work["report_type"].notna().any()
-    ):
+    if report_types is not None and "report_type" in work and work["report_type"].notna().any():
         allowed = {str(value) for value in report_types}
         work = work.loc[work["report_type"].astype("string").isin(allowed)].copy()
     if work.empty:
@@ -400,21 +370,17 @@ def select_fundamentals_as_of(
     ambiguous = ambiguous.loc[ambiguous > 1]
     if not ambiguous.empty:
         sample = [tuple(value) for value in ambiguous.index[:5]]
-        raise FundamentalPITError(
-            f"ambiguous financial versions at decision time: {sample}"
-        )
+        raise FundamentalPITError(f"ambiguous financial versions at decision time: {sample}")
     selected = candidates.drop(columns=["_latest_flag"], errors="ignore")
     if latest_report_only:
-        latest_period = selected.groupby("instrument_id", observed=True)[
-            "report_period"
-        ].transform("max")
+        latest_period = selected.groupby("instrument_id", observed=True)["report_period"].transform(
+            "max"
+        )
         selected = selected.loc[selected["report_period"].eq(latest_period)].copy()
     selected["decision_at"] = decision
     selected["research_as_of_at"] = research_as_of
     local_decision = decision.tz_convert("Asia/Shanghai").tz_localize(None).normalize()
-    selected["report_age_days"] = (
-        local_decision - selected["report_period"]
-    ).dt.days
+    selected["report_age_days"] = (local_decision - selected["report_period"]).dt.days
     return selected.sort_values(["instrument_id", "report_period"]).reset_index(drop=True)
 
 
@@ -473,12 +439,8 @@ def _curate_statement(
         calendar,
         f"fundamentals_{statement}",
     )
-    local_event = result["available_date"] + pd.Timedelta(
-        hours=23, minutes=59, seconds=59
-    )
-    result["announcement_at"] = local_event.dt.tz_localize(
-        "Asia/Shanghai"
-    ).dt.tz_convert("UTC")
+    local_event = result["available_date"] + pd.Timedelta(hours=23, minutes=59, seconds=59)
+    result["announcement_at"] = local_event.dt.tz_localize("Asia/Shanghai").dt.tz_convert("UTC")
     result["instrument_id"] = result["symbol"].map(
         lambda symbol: aliases.get(str(symbol), f"CN_EQ:{symbol}")
     )
@@ -549,11 +511,27 @@ def _load_aliases(
     if aliases_path is not None:
         path = Path(aliases_path).resolve()
         payload = json.loads(path.read_text(encoding="utf-8"))
+        continuity_policies = []
         for alias in payload.get("aliases", []):
+            _validate_alias_continuity_policy(alias)
             stable = str(alias["stable_instrument_id"])
             aliases[str(alias["historical_symbol"])] = stable
             aliases[str(alias["current_symbol"])] = stable
-        identity["reviewed_aliases"] = {"sha256": _sha256(path)}
+            continuity_policies.append(
+                {
+                    "stable_instrument_id": stable,
+                    "effective_date": str(alias["effective_date"]),
+                    "legal_continuity": alias["legal_continuity"],
+                    "business_continuity": alias["business_continuity"],
+                    "price_chain_policy": alias["price_chain_policy"],
+                    "fundamental_chain_policy": alias["fundamental_chain_policy"],
+                }
+            )
+        identity["reviewed_aliases"] = {
+            "sha256": _sha256(path),
+            "version": payload.get("version"),
+            "continuity_policies": continuity_policies,
+        }
     if security_code_mappings_path is not None:
         path = Path(security_code_mappings_path).resolve()
         mappings = pd.read_parquet(path)
@@ -570,6 +548,40 @@ def _load_aliases(
             "sha256": _sha256(path),
         }
     return aliases, identity
+
+
+def _validate_alias_continuity_policy(alias: Mapping[str, Any]) -> None:
+    required = {
+        "current_symbol",
+        "historical_symbol",
+        "effective_date",
+        "stable_instrument_id",
+        "legal_continuity",
+        "business_continuity",
+        "price_chain_policy",
+        "fundamental_chain_policy",
+        "evidence",
+    }
+    missing = sorted(required - set(alias))
+    if missing:
+        raise FundamentalPITError(f"reviewed alias missing fields: {missing}")
+    current = str(alias["current_symbol"])
+    if alias["legal_continuity"] is not True:
+        raise FundamentalPITError(f"reviewed alias does not prove legal continuity: {current}")
+    if not isinstance(alias["business_continuity"], bool):
+        raise FundamentalPITError(f"reviewed alias has invalid business continuity: {current}")
+    if alias["price_chain_policy"] != "continuous":
+        raise FundamentalPITError(
+            f"legally continuous alias must preserve its price chain: {current}"
+        )
+    expected = "continuous" if alias["business_continuity"] is True else "reset_at_effective_date"
+    if alias["fundamental_chain_policy"] != expected:
+        raise FundamentalPITError(
+            f"fundamental chain policy conflicts with business continuity: {current}"
+        )
+    evidence = str(alias["evidence"])
+    if not evidence.startswith("https://"):
+        raise FundamentalPITError(f"reviewed alias evidence must be an HTTPS source: {current}")
 
 
 def _lake_manifest_by_path(lake_root: Path) -> Dict[str, Dict[str, Any]]:
@@ -597,9 +609,7 @@ def _validate_calendar(calendar: pd.DataFrame) -> None:
         raise FundamentalPITError("trading calendar has no valid open sessions")
 
 
-def _write_immutable_parquet(
-    frame: pd.DataFrame, path: Path, sort_columns: Iterable[str]
-) -> None:
+def _write_immutable_parquet(frame: pd.DataFrame, path: Path, sort_columns: Iterable[str]) -> None:
     columns = [column for column in sort_columns if column in frame.columns]
     normalized = frame.sort_values(columns).reset_index(drop=True) if columns else frame
     expected = _frame_fingerprint(normalized)
