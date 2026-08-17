@@ -1,10 +1,8 @@
 # P0.7 单因子评测报告：rev20_skip1
 
-> 历史 v1，已由 `rev20_skip1_pilot_report_v2.md` 取代。v2 修正市值绝对量纲并绑定新的不可变产物身份；排名和评测数值未因全局常数缩放而变化。
-
 ## 结论
 
-产物 `255ea9b146a192fefbe6` 通过 P0.7 数据与工程门禁。门禁通过不等于因子具有投资价值。
+产物 `1aef4fd25f2572cccc2a` 通过 P0.7 数据与工程门禁。门禁通过不等于因子具有投资价值。
 
 ## 冻结身份
 
@@ -14,10 +12,10 @@
 - 市值分层数：`5`
 - 主报告收益口径：`raw`
 - 参数 SHA-256：`74961eff7b5129d896661beef4f16672c2e257f21dad41b25e857c79489fa96f`
-- 观测输入 SHA-256：`8379ab6985f872b2718db387b1d2c23b6f6e8df18d0b2ae072ae5dbbd0d867fe`
+- 观测输入 SHA-256：`8cc2d423f3cbb00ecf5ce64c6b3a3b0fb47bed909a239b70c39ea0df10815630`
 - 收益标签 SHA-256：`8b6ca6b92ad49266225c6dbd80b6eba86588d68bcb05b3a598464e53cf0de152`
-- Git commit：`0781e2a9d0e03798fc330e65ca4667a71bf4b49d`
-- Git tree：`9bbe090254ad805696db5d0e4e759e214a82da28`
+- Git commit：`76d8a5a18b92bacd4d870c4fe4de788717a5d70c`
+- Git tree：`4545121992af9bee4abd546a7071b13eb5e444ac`
 - 依赖锁 SHA-256：`836882d0d8a77242a92e29a1cd2f19ede916e2fb44f30ff4f52eeb59f67b2fb0`
 
 ## 数据质量
