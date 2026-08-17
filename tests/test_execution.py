@@ -14,7 +14,7 @@ from qrp.execution import (
     build_execution_artifact,
     simulate_orders,
 )
-from qrp.execution.daily import DailyExecutionEngine
+from qrp.execution.daily import DailyExecutionEngine, ExecutionError
 
 
 def _market(trade_dates=("2024-01-02",), **overrides):
@@ -304,6 +304,34 @@ def test_seeded_position_supports_starting_portfolio_and_odd_lot_liquidation():
     result = engine.execute(order, _market().iloc[0].to_dict())
     assert result["filled_quantity"] == 299
     assert ledger.position("CN_EQ:000001.SZ").total_quantity == 0
+
+
+def test_fractional_bonus_entitlement_uses_explicit_conservative_floor():
+    ledger = PortfolioLedger(0.0)
+    ledger.seed_position("CN_EQ:000001.SZ", 101, average_cost=10.0)
+    event = ledger.apply_corporate_action(
+        {
+            "instrument_id": "CN_EQ:000001.SZ",
+            "action_type": "bonus",
+            "effective_date": "2024-01-02",
+            "share_ratio": 1.05,
+            "fractional_share_policy": "floor_zero_value_v1",
+        }
+    )
+    assert ledger.position("CN_EQ:000001.SZ").total_quantity == 106
+    assert event["fractional_total_discarded"] == pytest.approx(0.05)
+
+    strict = PortfolioLedger(0.0)
+    strict.seed_position("CN_EQ:000001.SZ", 101, average_cost=10.0)
+    with pytest.raises(ExecutionError, match="lacks a supported policy"):
+        strict.apply_corporate_action(
+            {
+                "instrument_id": "CN_EQ:000001.SZ",
+                "action_type": "bonus",
+                "effective_date": "2024-01-02",
+                "share_ratio": 1.05,
+            }
+        )
 
 
 def test_execution_artifact_is_immutable_and_deterministic():

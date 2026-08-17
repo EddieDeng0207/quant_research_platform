@@ -30,6 +30,7 @@ class BacktestSpec:
     max_stale_valuation_sessions: int = 20
     target_weight_tolerance: float = 1e-6
     terminal_delisting_policy: str = "zero_recovery_at_delist_open_v1"
+    fractional_share_policy: str = "floor_zero_value_v1"
     version: str = "a_share_daily_portfolio_backtest_v2_p063"
 
     def validate(self) -> "BacktestSpec":
@@ -43,6 +44,8 @@ class BacktestSpec:
             raise ValueError("target_weight_tolerance must be non-negative")
         if self.terminal_delisting_policy != "zero_recovery_at_delist_open_v1":
             raise ValueError("unsupported terminal_delisting_policy")
+        if self.fractional_share_policy != "floor_zero_value_v1":
+            raise ValueError("unsupported fractional_share_policy")
         return self
 
     @property
@@ -92,7 +95,12 @@ def run_portfolio_backtest(
         if corporate_actions is not None and not corporate_actions.empty
         else terminal_actions
     )
-    actions = _prepare_corporate_actions(action_inputs, market, calendar)
+    actions = _prepare_corporate_actions(
+        action_inputs,
+        market,
+        calendar,
+        fractional_share_policy=bt_spec.fractional_share_policy,
+    )
     seeded = _prepare_initial_positions(initial_positions)
     if not set(seeded["instrument_id"]).issubset(set(market["instrument_id"])):
         raise ExecutionError("initial position is outside the backtest market")
@@ -581,7 +589,11 @@ def _prepare_initial_positions(frame: Optional[pd.DataFrame]) -> pd.DataFrame:
 
 
 def _prepare_corporate_actions(
-    frame: Optional[pd.DataFrame], market: pd.DataFrame, calendar: pd.DatetimeIndex
+    frame: Optional[pd.DataFrame],
+    market: pd.DataFrame,
+    calendar: pd.DatetimeIndex,
+    *,
+    fractional_share_policy: str = "floor_zero_value_v1",
 ) -> pd.DataFrame:
     columns = [
         "action_id",
@@ -597,6 +609,7 @@ def _prepare_corporate_actions(
         "cash_per_share",
         "withholding_tax_rate",
         "settlement_price",
+        "fractional_share_policy",
         "processing_date",
         "processing_stage",
     ]
@@ -635,6 +648,7 @@ def _prepare_corporate_actions(
         if column not in work:
             work[column] = default
         work[column] = pd.to_numeric(work[column], errors="coerce")
+    work["fractional_share_policy"] = fractional_share_policy
     valid_types = {"cash_dividend", "split", "bonus", "delisting_cash_settlement"}
     if not work["action_type"].isin(valid_types).all():
         raise ExecutionError("corporate actions contain unsupported action types")
