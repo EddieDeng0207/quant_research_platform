@@ -30,11 +30,7 @@ def _factor_inputs(periods: int = 30, securities: int = 30):
             industry = f"I{security % 3}"
             market_cap = float(1e9 * (1.0 + security / 10.0))
             residual = (security % 10 - 4.5) + 0.07 * period
-            raw_factor = (
-                residual
-                + 1.5 * (security % 3)
-                + 0.8 * np.log(market_cap / 1e9)
-            )
+            raw_factor = residual + 1.5 * (security % 3) + 0.8 * np.log(market_cap / 1e9)
             observations.append(
                 {
                     "instrument_id": instrument_id,
@@ -135,14 +131,27 @@ def test_quantile_portfolio_exposure_gate_catches_tail_concentration():
     assert failures["neutralization_first_order_industry_sanity_breach_rows"] == 0
     assert failures["neutralization_first_order_size_sanity_breach_rows"] == 0
 
+    stratified = evaluate_single_factor(
+        observations,
+        labels,
+        replace(
+            spec,
+            quantile_assignment="industry_size_stratified",
+            size_strata=5,
+        ),
+    )
+    assert stratified.quality["promotion_passed"]
+    assert stratified.quality["hard_failures"]["top_bottom_industry_active_weight_breach_rows"] == 0
+    assert stratified.quality["hard_failures"]["top_bottom_log_market_cap_z_breach_rows"] == 0
+    assert stratified.factor_panel["size_stratum"].between(1, 5).all()
+    assert stratified.factor_panel["quantile_stratum"].str.contains(r"\|S").all()
+
 
 def test_noise_aware_exposure_threshold_accepts_small_universe_random_factor():
     observations, labels = _factor_inputs(periods=10, securities=250)
     security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)
     observations["industry_code"] = "I" + (security_number % 8).astype(str)
-    observations["factor_value"] = np.random.default_rng(20260815).normal(
-        size=len(observations)
-    )
+    observations["factor_value"] = np.random.default_rng(20260815).normal(size=len(observations))
     spec = FactorEvaluationSpec(
         factor_name="independent_random",
         factor_family="fundamental",
@@ -153,12 +162,8 @@ def test_noise_aware_exposure_threshold_accepts_small_universe_random_factor():
 
     result = evaluate_single_factor(observations, labels, spec)
 
-    assert result.quality["hard_failures"][
-        "top_bottom_industry_active_weight_breach_rows"
-    ] == 0
-    assert result.quality["hard_failures"][
-        "top_bottom_log_market_cap_z_breach_rows"
-    ] == 0
+    assert result.quality["hard_failures"]["top_bottom_industry_active_weight_breach_rows"] == 0
+    assert result.quality["hard_failures"]["top_bottom_log_market_cap_z_breach_rows"] == 0
     portfolio_exposures = result.factor_exposures.loc[
         result.factor_exposures["scope"] == "quantile_portfolio"
     ]
@@ -181,9 +186,7 @@ def test_return_residualization_failure_falls_back_to_raw_with_diagnostics():
         1e9,
         1e9 + security_number * 1e7,
     )
-    observations["factor_value"] = np.random.default_rng(17).normal(
-        size=len(observations)
-    )
+    observations["factor_value"] = np.random.default_rng(17).normal(size=len(observations))
     missing = labels["instrument_id"].str.removeprefix("CN").astype(int) >= 100
     labels.loc[missing, "forward_return"] = np.nan
     spec = FactorEvaluationSpec(
@@ -199,13 +202,11 @@ def test_return_residualization_failure_falls_back_to_raw_with_diagnostics():
     result = evaluate_single_factor(observations, labels, spec)
 
     assert (result.ic_series["return_basis"] == "raw_fallback").all()
-    assert result.ic_series["residualization_error"].str.contains(
-        "constant|rank deficient"
-    ).all()
+    assert result.ic_series["residualization_error"].str.contains("constant|rank deficient").all()
     assert result.quality["residualization_failure_periods"] == len(result.ic_series)
-    assert result.quality["hard_failures"][
-        "requested_residualized_return_failure_periods"
-    ] == len(result.ic_series)
+    assert result.quality["hard_failures"]["requested_residualized_return_failure_periods"] == len(
+        result.ic_series
+    )
     assert not result.quality["promotion_passed"]
 
 
@@ -229,11 +230,7 @@ def test_label_coverage_excludes_structural_tail_by_horizon():
     strict_spec = replace(_spec(), minimum_label_match_rate=0.9999)
     missing_result = evaluate_single_factor(observations, internally_missing, strict_spec)
     assert missing_result.quality["unexpected_missing_label_rows"] == 1
-    assert (
-        missing_result.quality["hard_failures"]
-        ["horizon_label_match_rate_below_threshold"]
-        == 1
-    )
+    assert missing_result.quality["hard_failures"]["horizon_label_match_rate_below_threshold"] == 1
 
 
 def test_frequency_mismatch_and_single_member_industry_fail_closed():
@@ -257,13 +254,14 @@ def test_frequency_mismatch_and_single_member_industry_fail_closed():
 
 
 def test_institutional_defaults_and_declared_outcome_cutoff_are_enforced():
-    defaults = FactorEvaluationSpec(
-        factor_name="default_profile", factor_family="fundamental"
-    )
+    defaults = FactorEvaluationSpec(factor_name="default_profile", factor_family="fundamental")
     assert defaults.min_cross_section == 200
     assert defaults.min_ic_observations == 100
     assert defaults.min_evaluation_periods == 104
     assert defaults.min_industry_members == 5
+    assert defaults.quantile_assignment == "global"
+    with pytest.raises(ValueError, match="unsupported quantile_assignment"):
+        replace(defaults, quantile_assignment="unfrozen_method").validate()
 
     observations, labels = _factor_inputs(periods=2)
     labels["outcome_observation_end_at"] = labels["label_end_at"].min()
@@ -277,9 +275,7 @@ def test_institutional_defaults_and_declared_outcome_cutoff_are_enforced():
 
 def test_factor_timing_and_outcome_direction_fail_closed():
     observations, labels = _factor_inputs(periods=2)
-    observations.loc[0, "available_at"] = observations.loc[0, "decision_at"] + pd.Timedelta(
-        hours=1
-    )
+    observations.loc[0, "available_at"] = observations.loc[0, "decision_at"] + pd.Timedelta(hours=1)
     with pytest.raises(FutureDataError):
         evaluate_single_factor(
             observations,
@@ -294,9 +290,7 @@ def test_factor_timing_and_outcome_direction_fail_closed():
         )
 
     observations, labels = _factor_inputs(periods=2)
-    labels.loc[0, "label_start_at"] = labels.loc[0, "execution_at"] - pd.Timedelta(
-        minutes=1
-    )
+    labels.loc[0, "label_start_at"] = labels.loc[0, "execution_at"] - pd.Timedelta(minutes=1)
     with pytest.raises(FactorEvaluationError, match="starts before"):
         evaluate_single_factor(
             observations,
@@ -332,7 +326,7 @@ def test_factor_artifact_is_deterministic_and_report_verifies_hashes(tmp_path: P
     )
     assert first == second
     manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "p07_single_factor_evaluation_v4"
+    assert manifest["schema_version"] == "p07_single_factor_evaluation_v5"
     assert manifest["quality"]["promotion_passed"]
     assert "label_coverage" in manifest["outputs"]
     report = generate_factor_evaluation_report(first, tmp_path / "report.md")

@@ -12,7 +12,15 @@ import pandas as pd
 from .backtest import BacktestSpec, build_backtest_artifact, generate_backtest_report
 from .config import load_env_file
 from .data.audit import audit_lake, write_audit_report
-from .data.corporate_actions import build_corporate_action_artifact
+from .data.corporate_action_ingestion import (
+    CorporateActionBackfillConfig,
+    CorporateActionIngestionRunner,
+    frozen_symbols_from_tradability,
+)
+from .data.corporate_actions import (
+    build_corporate_action_artifact,
+    build_corporate_action_artifact_from_ingestion_run,
+)
 from .data.curated import build_curated_price_artifact
 from .data.fundamental_ingestion import (
     FUNDAMENTAL_STATEMENTS,
@@ -54,7 +62,11 @@ from .execution import (
 )
 from .research import (
     FactorEvaluationSpec,
+    PriceReversalInputSpec,
+    ReversalExecutionInputSpec,
     build_factor_evaluation_artifact,
+    build_price_reversal_input_artifact,
+    build_reversal_execution_input_artifact,
     generate_factor_evaluation_report,
 )
 
@@ -135,6 +147,24 @@ def _build_parser() -> argparse.ArgumentParser:
     actions.add_argument("--end", required=True, help="announcement end date")
     actions.add_argument("--data-root", default="data/lake")
 
+    action_backfill = subparsers.add_parser(
+        "backfill-corporate-actions",
+        help="run or resume P0.6.3 full-universe dividend/bonus ingestion",
+    )
+    action_backfill.add_argument("--tradability-artifact", required=True)
+    action_backfill.add_argument("--start", required=True, help="announcement start date")
+    action_backfill.add_argument("--end", required=True, help="announcement end date")
+    action_backfill.add_argument(
+        "--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE
+    )
+    action_backfill.add_argument("--max-attempts", type=int, default=3)
+    action_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
+    action_backfill.add_argument("--workers", type=int, default=4)
+    action_backfill.add_argument("--job-name", default="p063_corporate_actions_backfill")
+    action_backfill.add_argument("--data-root", default="data/lake")
+    action_backfill.add_argument("--artifact-root", default="artifacts")
+    action_backfill.add_argument("--state-root", default="state")
+
     macro = subparsers.add_parser("macro", help="ingest FRED/ALFRED observations")
     macro.add_argument("--provider", choices=("fred",), default="fred")
     macro.add_argument("--series", action="append", required=True)
@@ -164,9 +194,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="repeat to select datasets; defaults to bars, adjustments, and indicators",
     )
     backfill.add_argument("--exchange", default="SSE")
-    backfill.add_argument(
-        "--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE
-    )
+    backfill.add_argument("--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE)
     backfill.add_argument("--max-attempts", type=int, default=3)
     backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
     backfill.add_argument("--workers", type=int, default=1)
@@ -182,9 +210,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p05.add_argument("--start", required=True)
     p05.add_argument("--end", required=True)
     p05.add_argument("--exchange", default="SSE")
-    p05.add_argument(
-        "--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE
-    )
+    p05.add_argument("--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE)
     p05.add_argument("--max-attempts", type=int, default=3)
     p05.add_argument("--retry-base-seconds", type=float, default=2.0)
     p05.add_argument("--workers", type=int, default=1)
@@ -221,9 +247,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="use full-market quarterly VIP endpoints instead of the per-symbol grid",
     )
-    fundamental_backfill.add_argument(
-        "--job-name", default="p08_fundamentals_backfill"
-    )
+    fundamental_backfill.add_argument("--job-name", default="p08_fundamentals_backfill")
     fundamental_backfill.add_argument("--data-root", default="data/lake")
     fundamental_backfill.add_argument("--artifact-root", default="artifacts")
     fundamental_backfill.add_argument("--state-root", default="state")
@@ -237,9 +261,7 @@ def _build_parser() -> argparse.ArgumentParser:
     fundamental_pit.add_argument("--data-root", default="data/lake")
     fundamental_pit.add_argument("--output-root", default="data/curated")
     fundamental_pit.add_argument("--as-of-ingested-at")
-    fundamental_pit.add_argument(
-        "--aliases", default="configs/instrument_aliases.json"
-    )
+    fundamental_pit.add_argument("--aliases", default="configs/instrument_aliases.json")
     fundamental_pit.add_argument("--security-code-mappings")
     fundamental_pit.add_argument("--allow-failed-promotion", action="store_true")
     fundamental_pit.add_argument(
@@ -263,9 +285,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     industry_backfill.add_argument("--max-attempts", type=int, default=5)
     industry_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
-    industry_backfill.add_argument(
-        "--job-name", default="p08_industry_membership_backfill"
-    )
+    industry_backfill.add_argument("--job-name", default="p08_industry_membership_backfill")
     industry_backfill.add_argument("--data-root", default="data/lake")
     industry_backfill.add_argument("--artifact-root", default="artifacts")
     industry_backfill.add_argument("--state-root", default="state")
@@ -279,9 +299,7 @@ def _build_parser() -> argparse.ArgumentParser:
     industry_pit.add_argument("--end", required=True)
     industry_pit.add_argument("--data-root", default="data/lake")
     industry_pit.add_argument("--output-root", default="data/curated")
-    industry_pit.add_argument(
-        "--aliases", default="configs/instrument_aliases.json"
-    )
+    industry_pit.add_argument("--aliases", default="configs/instrument_aliases.json")
     industry_pit.add_argument("--security-code-mappings")
     industry_pit.add_argument("--allow-failed-promotion", action="store_true")
     industry_pit.add_argument("--allow-dirty-code", action="store_true")
@@ -296,9 +314,7 @@ def _build_parser() -> argparse.ArgumentParser:
     industry_coverage.add_argument("--start", required=True)
     industry_coverage.add_argument("--end", required=True)
     industry_coverage.add_argument("--minimum-coverage", type=float, default=0.80)
-    industry_coverage.add_argument(
-        "--output-root", default="artifacts/audits/industry_coverage"
-    )
+    industry_coverage.add_argument("--output-root", default="artifacts/audits/industry_coverage")
     industry_coverage.add_argument("--allow-dirty-code", action="store_true")
 
     readiness = subparsers.add_parser(
@@ -324,9 +340,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS,
     )
     readiness.add_argument("--data-root", default="data/lake")
-    readiness.add_argument(
-        "--output", default="artifacts/audits/latest_research_readiness.json"
-    )
+    readiness.add_argument("--output", default="artifacts/audits/latest_research_readiness.json")
     readiness.add_argument("--allow-not-ready", action="store_true")
 
     limits = subparsers.add_parser("daily-limits", help="ingest full-market daily price limits")
@@ -403,14 +417,10 @@ def _build_parser() -> argparse.ArgumentParser:
     build_execution.add_argument("--minimum-commission", type=float, default=5.0)
     build_execution.add_argument("--max-participation", type=float, default=0.01)
     build_execution.add_argument("--liquidity-haircut", type=float, default=1.0)
-    build_execution.add_argument(
-        "--max-position-free-float", type=float, default=0.001
-    )
+    build_execution.add_argument("--max-position-free-float", type=float, default=0.001)
     build_execution.add_argument("--base-slippage-bps", type=float, default=5.0)
     build_execution.add_argument("--impact-y", type=float, default=0.50)
-    build_execution.add_argument(
-        "--max-executable-impact-bps", type=float, default=100.0
-    )
+    build_execution.add_argument("--max-executable-impact-bps", type=float, default=100.0)
     build_execution.add_argument(
         "--allow-nonstandard-universe",
         action="store_true",
@@ -450,7 +460,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "build-corporate-actions",
         help="build causal implementation events from explicit raw snapshots",
     )
-    build_actions.add_argument("--raw", action="append", required=True)
+    action_source = build_actions.add_mutually_exclusive_group(required=True)
+    action_source.add_argument("--raw", action="append")
+    action_source.add_argument("--ingestion-run")
     build_actions.add_argument("--tradability-artifact", required=True)
     build_actions.add_argument("--output-root", default="data/curated")
     build_actions.add_argument("--allow-failed-promotion", action="store_true")
@@ -478,12 +490,8 @@ def _build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--max-stress-exit-days", type=float, default=3.0)
     backtest.add_argument("--base-slippage-bps", type=float, default=5.0)
     backtest.add_argument("--impact-y", type=float, default=0.50)
-    backtest.add_argument(
-        "--max-executable-impact-bps", type=float, default=100.0
-    )
-    backtest.add_argument(
-        "--minimum-routine-trade-notional", type=float, default=0.0
-    )
+    backtest.add_argument("--max-executable-impact-bps", type=float, default=100.0)
+    backtest.add_argument("--minimum-routine-trade-notional", type=float, default=0.0)
     backtest.add_argument(
         "--allow-dirty-code",
         action="store_true",
@@ -495,6 +503,39 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest_report.add_argument("--artifact", required=True)
     backtest_report.add_argument("--output", required=True)
+
+    reversal_inputs = subparsers.add_parser(
+        "build-price-reversal-inputs",
+        help="build PIT rev20/rev20_skip1 observations and open-to-open labels",
+    )
+    reversal_inputs.add_argument("--tradability-artifact", action="append", required=True)
+    reversal_inputs.add_argument("--industry-artifact", required=True)
+    reversal_inputs.add_argument("--start", required=True)
+    reversal_inputs.add_argument("--end", required=True)
+    reversal_inputs.add_argument("--research-as-of-at", required=True)
+    reversal_inputs.add_argument("--window-sessions", type=int, default=20)
+    reversal_inputs.add_argument("--skip-sessions", type=int, default=1)
+    reversal_inputs.add_argument("--min-observed-sessions", type=int, default=15)
+    reversal_inputs.add_argument("--min-listing-sessions", type=int, default=120)
+    reversal_inputs.add_argument("--horizon", action="append", type=int)
+    reversal_inputs.add_argument("--data-root", default="data/lake")
+    reversal_inputs.add_argument("--output-root", default="data/curated")
+
+    reversal_execution = subparsers.add_parser(
+        "build-reversal-execution-inputs",
+        help="freeze promoted P0.7 targets and lagged P0.6.3 capacity inputs",
+    )
+    reversal_execution.add_argument("--factor-artifact", required=True)
+    reversal_execution.add_argument(
+        "--warmup-tradability-artifact", action="append", required=True
+    )
+    reversal_execution.add_argument("--execution-tradability-artifact", required=True)
+    reversal_execution.add_argument("--research-as-of-at", required=True)
+    reversal_execution.add_argument("--execution-year", type=int, default=2023)
+    reversal_execution.add_argument("--min-periods-20", type=int, default=20)
+    reversal_execution.add_argument("--min-periods-60", type=int, default=60)
+    reversal_execution.add_argument("--data-root", default="data/lake")
+    reversal_execution.add_argument("--output-root", default="data/curated")
 
     factor = subparsers.add_parser(
         "build-factor-evaluation",
@@ -515,6 +556,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     factor.add_argument("--expected-direction", type=int, choices=(-1, 1), default=1)
     factor.add_argument("--quantiles", type=int, default=5)
+    factor.add_argument(
+        "--quantile-assignment",
+        choices=("global", "industry_size_stratified"),
+        default="global",
+    )
+    factor.add_argument("--size-strata", type=int, default=5)
     factor.add_argument("--winsor-mad-multiplier", type=float, default=5.0)
     factor.add_argument("--min-cross-section", type=int, default=200)
     factor.add_argument("--min-ic-observations", type=int, default=100)
@@ -531,9 +578,7 @@ def _build_parser() -> argparse.ArgumentParser:
     factor.add_argument("--annualization-periods", type=int, default=52)
     factor.add_argument("--annualization-frequency-tolerance", type=float, default=0.15)
     factor.add_argument("--minimum-newey-west-lags", type=int, default=1)
-    factor.add_argument(
-        "--return-basis", choices=("raw", "residualized"), default="raw"
-    )
+    factor.add_argument("--return-basis", choices=("raw", "residualized"), default="raw")
     factor.add_argument("--industry-active-weight-floor", type=float, default=0.05)
     factor.add_argument("--log-market-cap-z-floor", type=float, default=0.25)
     factor.add_argument("--exposure-sampling-sigma-multiplier", type=float, default=4.0)
@@ -566,9 +611,7 @@ def main(argv: List[str] = None) -> int:
         print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
         return 0 if report.passed else 1
     if args.command == "report-ingestion":
-        output = generate_ingestion_report(
-            Path(args.run), Path(args.audit), Path(args.output)
-        )
+        output = generate_ingestion_report(Path(args.run), Path(args.audit), Path(args.output))
         print(f"wrote ingestion report -> {output}")
         return 0
     if args.command == "build-prices":
@@ -593,9 +636,7 @@ def main(argv: List[str] = None) -> int:
             as_of_ingested_at=args.as_of_ingested_at,
             strict=not args.allow_failed_promotion,
             prior_tradability_artifact=(
-                Path(args.prior_tradability_artifact)
-                if args.prior_tradability_artifact
-                else None
+                Path(args.prior_tradability_artifact) if args.prior_tradability_artifact else None
             ),
         )
         print(f"built tradability artifact -> {output}")
@@ -638,9 +679,7 @@ def main(argv: List[str] = None) -> int:
     if args.command == "build-target-orders":
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        capacity_panel = (
-            _read_frame(Path(args.capacity_panel)) if args.capacity_panel else None
-        )
+        capacity_panel = _read_frame(Path(args.capacity_panel)) if args.capacity_panel else None
         orders = generate_target_weight_orders(
             _read_frame(Path(args.targets)),
             _read_frame(Path(args.positions)),
@@ -661,12 +700,20 @@ def main(argv: List[str] = None) -> int:
         print(f"built execution calibration artifact -> {output}")
         return 0
     if args.command == "build-corporate-actions":
-        output = build_corporate_action_artifact(
-            [Path(path) for path in args.raw],
-            Path(args.tradability_artifact),
-            Path(args.output_root),
-            strict=not args.allow_failed_promotion,
-        )
+        if args.ingestion_run:
+            output = build_corporate_action_artifact_from_ingestion_run(
+                Path(args.ingestion_run),
+                Path(args.tradability_artifact),
+                Path(args.output_root),
+                strict=not args.allow_failed_promotion,
+            )
+        else:
+            output = build_corporate_action_artifact(
+                [Path(path) for path in args.raw],
+                Path(args.tradability_artifact),
+                Path(args.output_root),
+                strict=not args.allow_failed_promotion,
+            )
         print(f"built corporate-action artifact -> {output}")
         return 0
     if args.command == "build-backtest":
@@ -696,9 +743,7 @@ def main(argv: List[str] = None) -> int:
                 base_slippage_bps=args.base_slippage_bps,
                 impact_y=args.impact_y,
                 max_executable_impact_bps=args.max_executable_impact_bps,
-                minimum_routine_trade_notional_cny=(
-                    args.minimum_routine_trade_notional
-                ),
+                minimum_routine_trade_notional_cny=(args.minimum_routine_trade_notional),
             ),
             fees=FeePolicy(
                 commission_bps=args.commission_bps,
@@ -712,6 +757,45 @@ def main(argv: List[str] = None) -> int:
         output = generate_backtest_report(Path(args.artifact), Path(args.output))
         print(f"built P0.6.3 report -> {output}")
         return 0
+    if args.command == "build-price-reversal-inputs":
+        output = build_price_reversal_input_artifact(
+            tradability_artifacts=[Path(value) for value in args.tradability_artifact],
+            lake_root=Path(args.data_root),
+            industry_artifact=Path(args.industry_artifact),
+            output_root=Path(args.output_root),
+            start_date=args.start,
+            end_date=args.end,
+            research_as_of_at=args.research_as_of_at,
+            spec=PriceReversalInputSpec(
+                window_sessions=args.window_sessions,
+                skip_sessions=args.skip_sessions,
+                min_observed_sessions=args.min_observed_sessions,
+                min_listing_sessions=args.min_listing_sessions,
+                horizons=tuple(args.horizon or (5, 10, 20, 60)),
+            ),
+        )
+        print(f"built price-reversal input artifact -> {output}")
+        return 0
+    if args.command == "build-reversal-execution-inputs":
+        output = build_reversal_execution_input_artifact(
+            factor_artifact=Path(args.factor_artifact),
+            warmup_tradability_artifacts=[
+                Path(value) for value in args.warmup_tradability_artifact
+            ],
+            execution_tradability_artifact=Path(
+                args.execution_tradability_artifact
+            ),
+            lake_root=Path(args.data_root),
+            output_root=Path(args.output_root),
+            research_as_of_at=args.research_as_of_at,
+            spec=ReversalExecutionInputSpec(
+                execution_year=args.execution_year,
+                min_periods_20=args.min_periods_20,
+                min_periods_60=args.min_periods_60,
+            ),
+        )
+        print(f"built reversal execution-input artifact -> {output}")
+        return 0
     if args.command == "build-factor-evaluation":
         output = build_factor_evaluation_artifact(
             Path(args.observations),
@@ -722,6 +806,8 @@ def main(argv: List[str] = None) -> int:
                 factor_family=args.factor_family,
                 expected_direction=args.expected_direction,
                 quantiles=args.quantiles,
+                quantile_assignment=args.quantile_assignment,
+                size_strata=args.size_strata,
                 winsor_mad_multiplier=args.winsor_mad_multiplier,
                 min_cross_section=args.min_cross_section,
                 min_ic_observations=args.min_ic_observations,
@@ -732,16 +818,12 @@ def main(argv: List[str] = None) -> int:
                 neutralization_weighting=args.neutralization_weighting,
                 target_gross_weight=args.target_gross_weight,
                 annualization_periods=args.annualization_periods,
-                annualization_frequency_tolerance=(
-                    args.annualization_frequency_tolerance
-                ),
+                annualization_frequency_tolerance=(args.annualization_frequency_tolerance),
                 minimum_newey_west_lags=args.minimum_newey_west_lags,
                 return_basis=args.return_basis,
                 industry_active_weight_floor=args.industry_active_weight_floor,
                 log_market_cap_z_floor=args.log_market_cap_z_floor,
-                exposure_sampling_sigma_multiplier=(
-                    args.exposure_sampling_sigma_multiplier
-                ),
+                exposure_sampling_sigma_multiplier=(args.exposure_sampling_sigma_multiplier),
             ),
             require_clean_git=not args.allow_dirty_code,
             strict=not args.allow_failed_promotion,
@@ -749,9 +831,7 @@ def main(argv: List[str] = None) -> int:
         print(f"built P0.7 factor evaluation artifact -> {output}")
         return 0
     if args.command == "report-factor":
-        output = generate_factor_evaluation_report(
-            Path(args.artifact), Path(args.output)
-        )
+        output = generate_factor_evaluation_report(Path(args.artifact), Path(args.output))
         print(f"built P0.7 factor report -> {output}")
         return 0
     try:
@@ -783,9 +863,7 @@ def main(argv: List[str] = None) -> int:
                 end_date=args.end,
                 aliases_path=Path(args.aliases) if args.aliases else None,
                 security_code_mappings_path=(
-                    Path(args.security_code_mappings)
-                    if args.security_code_mappings
-                    else None
+                    Path(args.security_code_mappings) if args.security_code_mappings else None
                 ),
                 require_clean_git=not args.allow_dirty_code,
                 strict=not args.allow_failed_promotion,
@@ -839,9 +917,7 @@ def main(argv: List[str] = None) -> int:
                 as_of_ingested_at=args.as_of_ingested_at,
                 aliases_path=Path(args.aliases) if args.aliases else None,
                 security_code_mappings_path=(
-                    Path(args.security_code_mappings)
-                    if args.security_code_mappings
-                    else None
+                    Path(args.security_code_mappings) if args.security_code_mappings else None
                 ),
                 require_clean_git=not args.allow_dirty_code,
                 strict=not args.allow_failed_promotion,
@@ -856,24 +932,16 @@ def main(argv: List[str] = None) -> int:
                 start_date=args.start,
                 end_date=args.end,
                 fundamental_artifact=(
-                    Path(args.fundamental_artifact)
-                    if args.fundamental_artifact
-                    else None
+                    Path(args.fundamental_artifact) if args.fundamental_artifact else None
                 ),
                 industry_membership_path=(
-                    Path(args.industry_membership)
-                    if args.industry_membership
-                    else None
+                    Path(args.industry_membership) if args.industry_membership else None
                 ),
                 minimum_weekly_periods=args.minimum_weekly_periods,
                 minimum_fundamental_symbols=args.minimum_fundamental_symbols,
                 minimum_industry_instruments=args.minimum_industry_instruments,
-                maximum_report_period_staleness_days=(
-                    args.maximum_report_period_staleness_days
-                ),
-                maximum_availability_staleness_days=(
-                    args.maximum_availability_staleness_days
-                ),
+                maximum_report_period_staleness_days=(args.maximum_report_period_staleness_days),
+                maximum_availability_staleness_days=(args.maximum_availability_staleness_days),
             )
             output = write_research_readiness_report(report, Path(args.output))
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
@@ -883,10 +951,7 @@ def main(argv: List[str] = None) -> int:
         if args.command in {"backfill-p0", "backfill-p05"}:
             provider = create_provider("tushare")
             datasets = (
-                tuple(
-                    args.dataset
-                    or ("daily_bars", "adjustment_factors", "daily_indicators")
-                )
+                tuple(args.dataset or ("daily_bars", "adjustment_factors", "daily_indicators"))
                 if args.command == "backfill-p0"
                 else (
                     "historical_instruments",
@@ -916,6 +981,33 @@ def main(argv: List[str] = None) -> int:
                 state_root=Path(args.state_root),
             ).run(config)
             print(f"completed P0 ingestion -> {run_path}")
+            return 0
+
+        if args.command == "backfill-corporate-actions":
+            symbols, universe = frozen_symbols_from_tradability(
+                Path(args.tradability_artifact)
+            )
+            provider = create_provider("tushare")
+            output = CorporateActionIngestionRunner(
+                provider=provider,
+                lake=ParquetLake(Path(args.data_root)),
+                artifact_root=Path(args.artifact_root),
+                state_root=Path(args.state_root),
+            ).run(
+                CorporateActionBackfillConfig(
+                    start_date=args.start,
+                    end_date=args.end,
+                    symbols=symbols,
+                    universe_artifact_id=universe["artifact_id"],
+                    universe_manifest_sha256=universe["manifest_sha256"],
+                    requests_per_minute=args.requests_per_minute,
+                    max_attempts=args.max_attempts,
+                    retry_base_seconds=args.retry_base_seconds,
+                    workers=args.workers,
+                    job_name=args.job_name,
+                )
+            )
+            print(f"completed corporate-action ingestion -> {output}")
             return 0
 
         provider = create_provider(args.provider)

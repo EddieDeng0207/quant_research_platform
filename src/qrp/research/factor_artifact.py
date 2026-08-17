@@ -57,12 +57,8 @@ def build_factor_evaluation_artifact(
         "implementation_sha256": implementation["tree_sha256"],
         "git_commit": code_identity["commit"] if code_identity else None,
         "git_tree": code_identity["tree"] if code_identity else None,
-        "git_dirty_state_sha256": (
-            code_identity["dirty_state_sha256"] if code_identity else None
-        ),
-        "environment_lock_sha256": (
-            environment_lock["sha256"] if environment_lock else None
-        ),
+        "git_dirty_state_sha256": (code_identity["dirty_state_sha256"] if code_identity else None),
+        "environment_lock_sha256": (environment_lock["sha256"] if environment_lock else None),
     }
     artifact_id = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -134,6 +130,12 @@ def build_factor_evaluation_artifact(
             "first_order_conditions_are_numerical_sanity_checks_only": True,
             "top_bottom_portfolio_exposure_limits": True,
             "sampling_noise_aware_portfolio_exposure_limits": True,
+            "quantile_assignment": frozen.quantile_assignment,
+            "industry_size_strata": (
+                frozen.size_strata
+                if frozen.quantile_assignment == "industry_size_stratified"
+                else None
+            ),
             "structural_label_tail_excluded_by_horizon": True,
             "decision_frequency_inferred_and_validated": True,
             "horizon_specific_newey_west_lags": True,
@@ -151,8 +153,7 @@ def build_factor_evaluation_artifact(
     _write_immutable_json(manifest, destination / "manifest.json")
     if strict and not result.quality["promotion_passed"]:
         raise FactorEvaluationError(
-            f"P0.7 artifact failed promotion at {destination}: "
-            f"{result.quality['hard_failures']}"
+            f"P0.7 artifact failed promotion at {destination}: {result.quality['hard_failures']}"
         )
     return destination
 
@@ -167,15 +168,14 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
     if manifest.get("schema_version") not in {
         "p07_single_factor_evaluation_v3",
         "p07_single_factor_evaluation_v4",
+        "p07_single_factor_evaluation_v5",
     }:
         raise FactorEvaluationError("report input is not a P0.7 factor artifact")
     for name, metadata in manifest["outputs"].items():
         path = root / metadata["path"]
         if not path.exists() or _sha256(path) != metadata["sha256"]:
             raise FactorEvaluationError(f"factor output hash mismatch: {name}")
-    horizons = pd.read_parquet(root / "horizon_summary.parquet").sort_values(
-        "horizon_sessions"
-    )
+    horizons = pd.read_parquet(root / "horizon_summary.parquet").sort_values("horizon_sessions")
     annual = pd.read_parquet(root / "annual_summary.parquet").sort_values(
         ["year", "horizon_sessions"]
     )
@@ -201,6 +201,8 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         "",
         f"- 因子族：`{spec['factor_family']}`",
         f"- 方向：`{spec['expected_direction']}`",
+        f"- 分组方法：`{spec.get('quantile_assignment', 'global')}`",
+        f"- 市值分层数：`{spec.get('size_strata', '不适用')}`",
         f"- 主报告收益口径：`{spec['return_basis']}`",
         f"- 参数 SHA-256：`{identity['spec_sha256']}`",
         f"- 观测输入 SHA-256：`{identity['observations_sha256']}`",
@@ -240,11 +242,11 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         )
     lines.extend(
         [
-        "",
-        "## 不同持有期结果",
-        "",
-        "| 持有期(交易日) | NW阶数 | 期数 | Pearson IC | Rank IC | HAC年化ICIR | Rank IC NW t | IC胜率 | 多空分层差 | 分层差 NW t | 单调性 |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "",
+            "## 不同持有期结果",
+            "",
+            "| 持有期(交易日) | NW阶数 | 期数 | Pearson IC | Rank IC | HAC年化ICIR | Rank IC NW t | IC胜率 | 多空分层差 | 分层差 NW t | 单调性 |",
+            "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in horizons.to_dict("records"):

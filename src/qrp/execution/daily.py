@@ -255,20 +255,31 @@ class PortfolioLedger:
         position = self.position(instrument_id)
         before_quantity = position.total_quantity
         cash_before = self.cash
+        fractional_total_discarded = 0.0
+        fractional_sellable_discarded = 0.0
         if action_type in {"split", "bonus"}:
             ratio = float(action["share_ratio"])
             if not np.isfinite(ratio) or ratio <= 0:
                 raise ExecutionError("corporate-action share_ratio must be positive")
             exact_total = position.total_quantity * ratio
             exact_sellable = position.sellable_quantity * ratio
-            if not math.isclose(exact_total, round(exact_total), abs_tol=1e-9) or not math.isclose(
-                exact_sellable, round(exact_sellable), abs_tol=1e-9
-            ):
+            policy = str(action.get("fractional_share_policy", "fail_closed"))
+            fractional = (
+                not math.isclose(exact_total, round(exact_total), abs_tol=1e-9)
+                or not math.isclose(exact_sellable, round(exact_sellable), abs_tol=1e-9)
+            )
+            if fractional and policy != "floor_zero_value_v1":
                 raise ExecutionError(
-                    "fractional corporate-action entitlement requires explicit cash-in-lieu"
+                    "fractional corporate-action entitlement lacks a supported policy"
                 )
-            new_total = int(round(exact_total))
-            new_sellable = int(round(exact_sellable))
+            if fractional:
+                new_total = int(math.floor(exact_total + 1e-12))
+                new_sellable = int(math.floor(exact_sellable + 1e-12))
+                fractional_total_discarded = exact_total - new_total
+                fractional_sellable_discarded = exact_sellable - new_sellable
+            else:
+                new_total = int(round(exact_total))
+                new_sellable = int(round(exact_sellable))
             position.total_quantity = new_total
             position.sellable_quantity = min(new_total, new_sellable)
         elif action_type == "cash_dividend":
@@ -306,6 +317,8 @@ class PortfolioLedger:
             "quantity_after": position.total_quantity,
             "cash_before": cash_before,
             "cash_after": self.cash,
+            "fractional_total_discarded": fractional_total_discarded,
+            "fractional_sellable_discarded": fractional_sellable_discarded,
         }
 
     def mark_to_market(

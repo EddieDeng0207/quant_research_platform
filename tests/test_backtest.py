@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from qrp.backtest import (
     BacktestSpec,
@@ -11,8 +12,13 @@ from qrp.backtest import (
     generate_backtest_report,
     run_portfolio_backtest,
 )
-from qrp.backtest.artifact import backtest_quality_summary
+from qrp.backtest.artifact import (
+    _validate_corporate_action_input,
+    backtest_quality_summary,
+)
+from qrp.backtest.engine import _p05_terminal_delisting_actions
 from qrp.execution import ExecutionSpec
+from qrp.execution.daily import ExecutionError
 from qrp.execution.scenarios import ExecutionScenario
 
 
@@ -249,6 +255,36 @@ def test_cash_only_target_has_valid_nav_accounting():
     assert (result.daily_nav["nav"] == 100_000).all()
 
 
+def test_stale_valuation_is_persisted_but_blocks_promotion():
+    result = run_portfolio_backtest(
+        _targets().head(1),
+        _market(),
+        _capacity(),
+        initial_cash=100_000,
+        scenarios=(ExecutionScenario(name="base_open"),),
+    )
+    result.daily_positions.loc[
+        result.daily_positions.index[0], "stale_sessions"
+    ] = 21
+    quality = backtest_quality_summary(result, BacktestSpec(), ExecutionSpec())
+    assert not quality["promotion_passed"]
+    assert quality["hard_failures"]["stale_valuation_breach_rows"] == 1
+    assert quality["stale_valuation_breach_instruments"] == 1
+
+
+def test_p05_delist_date_creates_zero_recovery_terminal_event():
+    market = _market().copy()
+    market["delist_date"] = pd.Timestamp("2024-01-04")
+    calendar = pd.DatetimeIndex(market["trade_date"].unique()).sort_values()
+    actions = _p05_terminal_delisting_actions(market, calendar)
+    assert len(actions) == 1
+    assert actions.iloc[0]["action_type"] == "delisting_cash_settlement"
+    assert actions.iloc[0]["settlement_price"] == 0.0
+    assert actions.iloc[0]["available_at"] < pd.Timestamp(
+        "2024-01-04T01:30:00Z"
+    )
+
+
 def test_backtest_artifact_is_promoted_and_deterministic():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -295,3 +331,40 @@ def test_backtest_artifact_is_promoted_and_deterministic():
         assert manifest["quality"]["promotion_passed"]
         assert manifest["quality"]["hard_failures"]["nav_accounting_tie_failure_rows"] == 0
         assert manifest["artifact_id"] in report.read_text(encoding="utf-8")
+
+
+def test_formal_corporate_action_input_requires_full_query_coverage():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        action_path = root / "corporate_actions.parquet"
+        _actions().to_parquet(action_path, index=False)
+        action_sha = hashlib.sha256(action_path.read_bytes()).hexdigest()
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "artifact_id": "actions-test",
+                    "identity": {
+                        "p05_artifact_id": "p05-test",
+                        "p05_manifest_sha256": "p05-manifest-sha",
+                    },
+                    "quality": {
+                        "promotion_passed": True,
+                        "query_coverage": None,
+                        "hard_failures": {},
+                    },
+                    "output": {"sha256": action_sha},
+                    "guardrails": {
+                        "full_universe_query_coverage_proven": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ExecutionError, match="query-coverage proof"):
+            _validate_corporate_action_input(
+                action_path,
+                {"artifact_id": "p05-test"},
+                "p05-manifest-sha",
+                require_full_query_coverage=True,
+            )

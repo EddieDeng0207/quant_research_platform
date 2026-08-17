@@ -53,6 +53,24 @@ label_end_at > label_start_at
 决策，同时 `ingested_at` 不晚于全文件唯一的 `research_as_of_at`。该双时间契约自
 `p07_single_factor_evaluation_v4` 起生效；v3 报告仍可验证读取，但新产物不再生成 v3。
 
+### 3. 分组方法
+
+`p07_single_factor_evaluation_v5` 将分组方法纳入冻结参数。`global` 保留原有的
+全截面排序，适合诊断原始信号的尾部行业与规模集中；正式现金多头目标可显式
+选择 `industry_size_stratified`：先在每个决策日按市值划分 5 层，再在
+`neutralization_industry_code × size_stratum` 内部按 `signal_score` 排组。
+
+```text
+size_stratum = ceil(rank_pct(market_cap) * 5)
+quantile = ceil(rank_pct(signal_score | industry, size_stratum) * quantiles)
+```
+
+市值或信号并列时以排序后的 `instrument_id` 作为确定性次序，保证输入行顺序不
+改变内容寻址产物。该方法不改变中性化残差，也不读取未来收益；它只约束送入
+P0.6.3 的组合构造，使 Top/Bottom 组在行业和市值层上具有可解释的可比样本。
+分层数、分组方法及其实现哈希全部进入 manifest。暴露门禁保持不变，不能用
+分层分组替代事后暴露审计；某期如果因分层过细而缺少端点组，仍然硬失败。
+
 ## 截面处理
 
 所有统计只在单个 `decision_at` 的横截面内计算，不允许跨期拟合缩尾边界或

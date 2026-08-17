@@ -632,17 +632,10 @@ class TushareProvider:
             frame = frame.loc[
                 frame["announcement_date"].between(start, end, inclusive="both")
             ].copy()
-        identity_columns = [
-            "symbol",
-            "report_period",
-            "announcement_date",
-            "process_status",
-            "record_date",
-            "ex_date",
-            "pay_date",
-            "cash_per_share_tax",
-            "bonus_share_ratio",
-        ]
+        identity_columns = expected
+        vendor_duplicate_rows = int(frame.duplicated(identity_columns).sum())
+        if vendor_duplicate_rows:
+            frame = frame.drop_duplicates(identity_columns).copy()
         if frame.empty:
             frame["source_action_id"] = pd.Series(dtype=str)
         else:
@@ -674,8 +667,10 @@ class TushareProvider:
                 "cash_unit": "CNY_per_share",
                 "share_ratio_unit": "shares_per_share",
                 "contains_proposal_and_implementation_versions": True,
+                "exact_vendor_duplicate_rows_excluded": vendor_duplicate_rows,
                 "pagination": pagination,
             },
+            partition_values={"symbol": canonical},
         ).validate()
 
     def fetch_stock_status_by_date(self, trade_date: str) -> FetchResult:

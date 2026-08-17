@@ -26,6 +26,8 @@ class FactorEvaluationSpec:
     factor_family: str
     expected_direction: int = 1
     quantiles: int = 5
+    quantile_assignment: str = "global"
+    size_strata: int = 5
     winsor_mad_multiplier: float = 5.0
     min_cross_section: int = 200
     min_ic_observations: int = 100
@@ -42,7 +44,7 @@ class FactorEvaluationSpec:
     annualization_frequency_tolerance: float = 0.15
     minimum_newey_west_lags: int = 1
     return_basis: str = "raw"
-    version: str = "p07_single_factor_evaluation_v4"
+    version: str = "p07_single_factor_evaluation_v5"
 
     def validate(self) -> "FactorEvaluationSpec":
         if not self.factor_name.strip():
@@ -51,15 +53,25 @@ class FactorEvaluationSpec:
             raise ValueError("expected_direction must be -1 or 1")
         if self.quantiles < 2:
             raise ValueError("quantiles must be at least 2")
+        if self.quantile_assignment not in {
+            "global",
+            "industry_size_stratified",
+        }:
+            raise ValueError("unsupported quantile_assignment")
+        if self.size_strata < 2:
+            raise ValueError("size_strata must be at least 2")
         if self.winsor_mad_multiplier <= 0:
             raise ValueError("winsor_mad_multiplier must be positive")
-        if min(
-            self.min_cross_section,
-            self.min_ic_observations,
-            self.min_evaluation_periods,
-            self.min_industry_members,
-            self.annualization_periods,
-        ) < 2:
+        if (
+            min(
+                self.min_cross_section,
+                self.min_ic_observations,
+                self.min_evaluation_periods,
+                self.min_industry_members,
+                self.annualization_periods,
+            )
+            < 2
+        ):
             raise ValueError("sample and annualization requirements must be at least 2")
         if self.min_cross_section < self.min_ic_observations:
             raise ValueError("min_cross_section must be at least min_ic_observations")
@@ -179,9 +191,7 @@ def _prepare_factor_panel(
         raise FactorEvaluationError("decision_at and execution_at must be valid timestamps")
     if work.duplicated(["instrument_id", "decision_at"]).any():
         raise FactorEvaluationError("duplicate instrument-decision factor observations")
-    executions_per_decision = work.groupby("decision_at", observed=True)[
-        "execution_at"
-    ].nunique()
+    executions_per_decision = work.groupby("decision_at", observed=True)["execution_at"].nunique()
     if (executions_per_decision != 1).any():
         raise FactorEvaluationError("each decision_at must map to exactly one execution_at")
     if not (
@@ -205,9 +215,7 @@ def _prepare_factor_panel(
         eligible = cross_section.loc[cross_section["research_eligible"]].copy()
         finite_factor = np.isfinite(eligible["factor_value"])
         valid_cap = np.isfinite(eligible["market_cap"]) & (eligible["market_cap"] > 0)
-        valid_industry = eligible["industry_code"].notna() & (
-            eligible["industry_code"] != ""
-        )
+        valid_industry = eligible["industry_code"].notna() & (eligible["industry_code"] != "")
         usable = eligible.loc[finite_factor & valid_cap & valid_industry].copy()
         eligible_count = len(eligible)
         usable_count = len(usable)
@@ -240,9 +248,7 @@ def _prepare_factor_panel(
         usable["neutralization_industry_code"] = usable["industry_code"].where(
             ~usable["industry_code"].isin(sparse_industries), "__OTHER__"
         )
-        neutralization_counts = usable.groupby(
-            "neutralization_industry_code", observed=True
-        ).size()
+        neutralization_counts = usable.groupby("neutralization_industry_code", observed=True).size()
         industry_count = len(neutralization_counts)
         dynamic_required = max(spec.min_cross_section, industry_count + 3)
         coverage_row.update(
@@ -263,10 +269,7 @@ def _prepare_factor_panel(
             coverage_row["status"] = "insufficient_dynamic_cross_section"
             coverage_rows.append(coverage_row)
             continue
-        if (
-            neutralization_counts.empty
-            or neutralization_counts.min() < spec.min_industry_members
-        ):
+        if neutralization_counts.empty or neutralization_counts.min() < spec.min_industry_members:
             coverage_row["status"] = "sparse_industry_after_other_merge"
             coverage_rows.append(coverage_row)
             continue
@@ -302,10 +305,7 @@ def _prepare_factor_panel(
         usable["log_market_cap_z"] = _standardize(
             np.log(usable["market_cap"].to_numpy(dtype=float))
         )
-        percentile = pd.Series(score, index=usable.index).rank(method="average", pct=True)
-        usable["quantile"] = np.ceil(percentile * spec.quantiles).clip(
-            1, spec.quantiles
-        ).astype(int)
+        usable = _assign_quantiles(usable, spec)
         usable["factor_name"] = spec.factor_name
         usable["factor_family"] = spec.factor_family
         panels.append(
@@ -326,6 +326,8 @@ def _prepare_factor_panel(
                     "pre_neutral_zscore",
                     "neutralized_factor",
                     "signal_score",
+                    "size_stratum",
+                    "quantile_stratum",
                     "quantile",
                 ]
             ]
@@ -343,14 +345,50 @@ def _prepare_factor_panel(
         )
     if not panels:
         raise FactorEvaluationError("no cross-section passed factor preparation")
-    panel = pd.concat(panels, ignore_index=True).sort_values(
-        ["decision_at", "instrument_id"]
-    ).reset_index(drop=True)
+    panel = (
+        pd.concat(panels, ignore_index=True)
+        .sort_values(["decision_at", "instrument_id"])
+        .reset_index(drop=True)
+    )
     coverage = pd.DataFrame(coverage_rows).sort_values("decision_at").reset_index(drop=True)
-    exposures = pd.DataFrame(exposure_rows).sort_values(
-        ["decision_at", "scope", "quantile", "exposure_type", "exposure_name"]
-    ).reset_index(drop=True)
+    exposures = (
+        pd.DataFrame(exposure_rows)
+        .sort_values(["decision_at", "scope", "quantile", "exposure_type", "exposure_name"])
+        .reset_index(drop=True)
+    )
     return panel, coverage, exposures
+
+
+def _assign_quantiles(
+    usable: pd.DataFrame,
+    spec: FactorEvaluationSpec,
+) -> pd.DataFrame:
+    """Assign deterministic global or industry/size-stratified quantiles."""
+    assigned = usable.copy()
+    if spec.quantile_assignment == "global":
+        percentile = assigned["signal_score"].rank(method="average", pct=True)
+        assigned["size_stratum"] = 0
+        assigned["quantile_stratum"] = "__GLOBAL__"
+    else:
+        # ``method=first`` is intentionally tied to stable instrument_id order so
+        # equal market caps and equal scores cannot make artifacts input-order dependent.
+        ranked = assigned.sort_values("instrument_id", kind="stable").copy()
+        size_percentile = ranked["market_cap"].rank(method="first", pct=True)
+        ranked["size_stratum"] = (
+            np.ceil(size_percentile * spec.size_strata).clip(1, spec.size_strata).astype(int)
+        )
+        ranked["quantile_stratum"] = (
+            ranked["neutralization_industry_code"].astype(str)
+            + "|S"
+            + ranked["size_stratum"].astype(str)
+        )
+        percentile = ranked.groupby("quantile_stratum", sort=True, observed=True)[
+            "signal_score"
+        ].rank(method="first", pct=True)
+        assigned = ranked.sort_index()
+        percentile = percentile.reindex(assigned.index)
+    assigned["quantile"] = np.ceil(percentile * spec.quantiles).clip(1, spec.quantiles).astype(int)
+    return assigned
 
 
 def _prepare_forward_returns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -388,24 +426,22 @@ def _prepare_forward_returns(frame: pd.DataFrame) -> pd.DataFrame:
     if labels["outcome_observation_end_at"].nunique() != 1:
         raise FactorEvaluationError("outcome_observation_end_at must be globally frozen")
     numeric_horizon = pd.to_numeric(labels["horizon_sessions"], errors="coerce")
-    if numeric_horizon.isna().any() or (numeric_horizon <= 0).any() or (
-        numeric_horizon % 1 != 0
-    ).any():
+    if (
+        numeric_horizon.isna().any()
+        or (numeric_horizon <= 0).any()
+        or (numeric_horizon % 1 != 0).any()
+    ):
         raise FactorEvaluationError("horizon_sessions must be positive integers")
     labels["horizon_sessions"] = numeric_horizon.astype(int)
     labels["forward_return"] = pd.to_numeric(labels["forward_return"], errors="coerce")
-    finite_or_null = labels["forward_return"].isna() | np.isfinite(
-        labels["forward_return"]
-    )
+    finite_or_null = labels["forward_return"].isna() | np.isfinite(labels["forward_return"])
     if (~finite_or_null).any():
         raise FactorEvaluationError("forward_return must be finite or structural null")
     if (labels["label_start_at"] < labels["execution_at"]).any():
         raise FactorEvaluationError("outcome label starts before factor execution")
     if (labels["label_end_at"] <= labels["label_start_at"]).any():
         raise FactorEvaluationError("outcome label must end after it starts")
-    structural_tail = (
-        labels["label_end_at"] > labels["outcome_observation_end_at"]
-    )
+    structural_tail = labels["label_end_at"] > labels["outcome_observation_end_at"]
     if (structural_tail & labels["forward_return"].notna()).any():
         raise FactorEvaluationError(
             "forward_return cannot use observations beyond outcome_observation_end_at"
@@ -420,9 +456,11 @@ def _join_outcome_labels(
     panel: pd.DataFrame, labels: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     horizons = sorted(labels["horizon_sessions"].unique())
-    expected = panel.assign(_join_key=1).merge(
-        pd.DataFrame({"horizon_sessions": horizons, "_join_key": 1}), on="_join_key"
-    ).drop(columns="_join_key")
+    expected = (
+        panel.assign(_join_key=1)
+        .merge(pd.DataFrame({"horizon_sessions": horizons, "_join_key": 1}), on="_join_key")
+        .drop(columns="_join_key")
+    )
     evaluated = expected.merge(
         labels,
         on=["instrument_id", "execution_at", "horizon_sessions"],
@@ -430,16 +468,13 @@ def _join_outcome_labels(
         validate="one_to_one",
     )
     sample_end = labels["outcome_observation_end_at"].iloc[0]
-    evaluated["structural_tail"] = (
-        evaluated["label_end_at"].notna()
-        & (evaluated["label_end_at"] > evaluated["outcome_observation_end_at"])
+    evaluated["structural_tail"] = evaluated["label_end_at"].notna() & (
+        evaluated["label_end_at"] > evaluated["outcome_observation_end_at"]
     )
     evaluated["structurally_available"] = ~evaluated["structural_tail"]
     evaluated["label_matched"] = evaluated["forward_return"].notna()
     coverage_rows = []
-    for horizon, group in evaluated.groupby(
-        "horizon_sessions", sort=True, observed=True
-    ):
+    for horizon, group in evaluated.groupby("horizon_sessions", sort=True, observed=True):
         available = group["structurally_available"]
         matched = group["label_matched"]
         available_count = int(available.sum())
@@ -453,9 +488,7 @@ def _join_outcome_labels(
                 "structurally_available_rows": available_count,
                 "matched_rows": matched_available,
                 "unexpected_missing_rows": int((available & ~matched).sum()),
-                "match_rate": (
-                    matched_available / available_count if available_count else 0.0
-                ),
+                "match_rate": (matched_available / available_count if available_count else 0.0),
             }
         )
     coverage = pd.DataFrame(coverage_rows).sort_values("horizon_sessions")
@@ -500,9 +533,7 @@ def _evaluate_periods(
             }
             residualization_status = f"failed:{type(error).__name__}"
             residualization_error = str(error)
-        use_residualized = (
-            spec.return_basis == "residualized" and residualization_status == "ok"
-        )
+        use_residualized = spec.return_basis == "residualized" and residualization_status == "ok"
         primary = residual_metrics if use_residualized else raw_metrics
         effective_return_basis = (
             "residualized"
@@ -527,20 +558,14 @@ def _evaluate_periods(
                 "quantile_monotonicity": primary["quantile_monotonicity"],
                 "raw_pearson_ic": raw_metrics["pearson_ic"],
                 "raw_rank_ic": raw_metrics["rank_ic"],
-                "raw_top_minus_bottom_return": raw_metrics[
-                    "top_minus_bottom_return"
-                ],
+                "raw_top_minus_bottom_return": raw_metrics["top_minus_bottom_return"],
                 "residualized_pearson_ic": residual_metrics["pearson_ic"],
                 "residualized_rank_ic": residual_metrics["rank_ic"],
-                "residualized_top_minus_bottom_return": residual_metrics[
-                    "top_minus_bottom_return"
-                ],
+                "residualized_top_minus_bottom_return": residual_metrics["top_minus_bottom_return"],
             }
         )
         residual_by_index = pd.Series(residual_returns, index=group.index)
-        for quantile, quantile_group in group.groupby(
-            "quantile", sort=True, observed=True
-        ):
+        for quantile, quantile_group in group.groupby("quantile", sort=True, observed=True):
             raw_mean = float(quantile_group["forward_return"].mean())
             residual_mean = float(residual_by_index.loc[quantile_group.index].mean())
             quantile_rows.append(
@@ -554,9 +579,7 @@ def _evaluate_periods(
                     "return_basis": effective_return_basis,
                     "residualization_status": residualization_status,
                     "residualization_error": residualization_error,
-                    "equal_weight_return": (
-                        residual_mean if use_residualized else raw_mean
-                    ),
+                    "equal_weight_return": (residual_mean if use_residualized else raw_mean),
                     "equal_weight_raw_return": raw_mean,
                     "equal_weight_residualized_return": residual_mean,
                 }
@@ -565,9 +588,7 @@ def _evaluate_periods(
         raise FactorEvaluationError("no period has enough observations for IC evaluation")
     return (
         pd.DataFrame(ic_rows).sort_values(keys).reset_index(drop=True),
-        pd.DataFrame(quantile_rows)
-        .sort_values([*keys, "quantile"])
-        .reset_index(drop=True),
+        pd.DataFrame(quantile_rows).sort_values([*keys, "quantile"]).reset_index(drop=True),
     )
 
 
@@ -581,9 +602,11 @@ def _cross_section_return_metrics(
         pd.Series(score).rank(method="average").to_numpy(dtype=float),
         pd.Series(returns).rank(method="average").to_numpy(dtype=float),
     )
-    means = pd.DataFrame(
-        {"quantile": quantiles.to_numpy(), "return": returns}
-    ).groupby("quantile", observed=True)["return"].mean()
+    means = (
+        pd.DataFrame({"quantile": quantiles.to_numpy(), "return": returns})
+        .groupby("quantile", observed=True)["return"]
+        .mean()
+    )
     top_bottom = (
         float(means.get(quantile_count, np.nan) - means.get(1, np.nan))
         if 1 in means.index and quantile_count in means.index
@@ -599,25 +622,27 @@ def _cross_section_return_metrics(
     }
 
 
-def _build_long_only_targets(
-    panel: pd.DataFrame, spec: FactorEvaluationSpec
-) -> pd.DataFrame:
+def _build_long_only_targets(panel: pd.DataFrame, spec: FactorEvaluationSpec) -> pd.DataFrame:
     selected = panel.loc[panel["quantile"] == spec.quantiles].copy()
     counts = selected.groupby("decision_at", observed=True)["instrument_id"].transform("size")
     selected["target_weight"] = spec.target_gross_weight / counts
     selected["target_policy"] = "equal_weight_top_quantile_long_only"
-    return selected[
-        [
-            "factor_name",
-            "decision_date",
-            "decision_at",
-            "execution_at",
-            "instrument_id",
-            "signal_score",
-            "target_weight",
-            "target_policy",
+    return (
+        selected[
+            [
+                "factor_name",
+                "decision_date",
+                "decision_at",
+                "execution_at",
+                "instrument_id",
+                "signal_score",
+                "target_weight",
+                "target_policy",
+            ]
         ]
-    ].sort_values(["decision_at", "instrument_id"]).reset_index(drop=True)
+        .sort_values(["decision_at", "instrument_id"])
+        .reset_index(drop=True)
+    )
 
 
 def _target_turnover(targets: pd.DataFrame, gross_weight: float) -> pd.DataFrame:
@@ -628,8 +653,7 @@ def _target_turnover(targets: pd.DataFrame, gross_weight: float) -> pd.DataFrame
         current["__CASH__"] = 1.0 - sum(current.values())
         instruments = set(previous) | set(current)
         turnover = 0.5 * sum(
-            abs(current.get(item, 0.0) - previous.get(item, 0.0))
-            for item in instruments
+            abs(current.get(item, 0.0) - previous.get(item, 0.0)) for item in instruments
         )
         rows.append(
             {
@@ -644,9 +668,7 @@ def _target_turnover(targets: pd.DataFrame, gross_weight: float) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
-def _infer_decision_frequency(
-    panel: pd.DataFrame, spec: FactorEvaluationSpec
-) -> Dict[str, float]:
+def _infer_decision_frequency(panel: pd.DataFrame, spec: FactorEvaluationSpec) -> Dict[str, float]:
     decisions = pd.DatetimeIndex(panel["decision_at"].drop_duplicates()).sort_values()
     if len(decisions) < 2:
         raise FactorEvaluationError("at least two decision dates are required")
@@ -726,9 +748,7 @@ def _summary_record(
         "newey_west_lags": nw_lags,
         "inferred_periods_per_year": frequency["inferred_periods_per_year"],
         "rank_ic_long_run_std": (
-            math.sqrt(rank_long_run_variance)
-            if np.isfinite(rank_long_run_variance)
-            else np.nan
+            math.sqrt(rank_long_run_variance) if np.isfinite(rank_long_run_variance) else np.nan
         ),
         "annualized_rank_ic_ir": (
             float(
@@ -739,9 +759,7 @@ def _summary_record(
             if len(rank_ic) > 1 and rank_long_run_variance > 0
             else np.nan
         ),
-        "rank_ic_positive_rate": (
-            float(np.mean(rank_ic > 0)) if len(rank_ic) else np.nan
-        ),
+        "rank_ic_positive_rate": (float(np.mean(rank_ic > 0)) if len(rank_ic) else np.nan),
         "rank_ic_newey_west_t": _newey_west_mean_t(rank_ic, nw_lags),
         "mean_top_minus_bottom_return": _safe_mean(spread),
         "spread_newey_west_t": _newey_west_mean_t(spread, nw_lags),
@@ -797,19 +815,17 @@ def _quality_summary(
     period_index = pd.MultiIndex.from_frame(
         ic_series[["decision_at", "horizon_sessions"]].drop_duplicates()
     )
-    endpoint_counts = quantile_returns.loc[
-        quantile_returns["quantile"].isin([1, spec.quantiles])
-    ].groupby(["decision_at", "horizon_sessions"], observed=True)["quantile"].nunique()
+    endpoint_counts = (
+        quantile_returns.loc[quantile_returns["quantile"].isin([1, spec.quantiles])]
+        .groupby(["decision_at", "horizon_sessions"], observed=True)["quantile"]
+        .nunique()
+    )
     endpoint_counts = endpoint_counts.reindex(period_index, fill_value=0)
-    first_order_industry = exposures.loc[
-        exposures["exposure_type"] == "first_order_industry_mean"
-    ]
+    first_order_industry = exposures.loc[exposures["exposure_type"] == "first_order_industry_mean"]
     first_order_size = exposures.loc[
         exposures["exposure_type"] == "first_order_log_market_cap_correlation"
     ]
-    endpoint_exposures = exposures.loc[
-        exposures["quantile"].isin([1, spec.quantiles])
-    ]
+    endpoint_exposures = exposures.loc[exposures["quantile"].isin([1, spec.quantiles])]
     portfolio_industry = endpoint_exposures.loc[
         endpoint_exposures["exposure_type"] == "industry_active_weight"
     ]
@@ -819,9 +835,7 @@ def _quality_summary(
     structurally_available = int(label_coverage["structurally_available_rows"].sum())
     matched = int(label_coverage["matched_rows"].sum())
     label_match_rate = matched / structurally_available if structurally_available else 0.0
-    residualization_failures = int(
-        (ic_series["residualization_status"] != "ok").sum()
-    )
+    residualization_failures = int((ic_series["residualization_status"] != "ok").sum())
     hard_failures = {
         "failed_cross_section_dates": int((coverage["status"] != "ok").sum()),
         "coverage_below_threshold_dates": int(
@@ -848,8 +862,7 @@ def _quality_summary(
         ),
         "top_bottom_log_market_cap_z_breach_rows": int(
             (
-                portfolio_size["exposure_value"].abs()
-                > portfolio_size["exposure_limit"] + 1e-12
+                portfolio_size["exposure_value"].abs() > portfolio_size["exposure_limit"] + 1e-12
             ).sum()
         ),
         "requested_residualized_return_failure_periods": (
@@ -866,16 +879,12 @@ def _quality_summary(
         "label_match_rate": label_match_rate,
         "minimum_horizon_label_match_rate": float(label_coverage["match_rate"].min()),
         "structural_tail_label_rows": int(label_coverage["structural_tail_rows"].sum()),
-        "unexpected_missing_label_rows": int(
-            label_coverage["unexpected_missing_rows"].sum()
-        ),
+        "unexpected_missing_label_rows": int(label_coverage["unexpected_missing_rows"].sum()),
         "residualization_failure_periods": residualization_failures,
         "maximum_top_bottom_industry_active_weight": float(
             portfolio_industry["exposure_value"].abs().max()
         ),
-        "maximum_top_bottom_log_market_cap_z": float(
-            portfolio_size["exposure_value"].abs().max()
-        ),
+        "maximum_top_bottom_log_market_cap_z": float(portfolio_size["exposure_value"].abs().max()),
         "maximum_top_bottom_industry_sampling_sigma": float(
             portfolio_industry["standardized_exposure"].max()
         ),
@@ -916,9 +925,7 @@ def _residualize(
         weights = weights / float(np.mean(weights))
     whiten = np.sqrt(weights)
     with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-        beta = np.linalg.lstsq(
-            design * whiten[:, None], values * whiten, rcond=None
-        )[0]
+        beta = np.linalg.lstsq(design * whiten[:, None], values * whiten, rcond=None)[0]
         residual = values - design @ beta
     if not np.isfinite(beta).all() or not np.isfinite(residual).all():
         raise FactorEvaluationError("neutralization produced non-finite coefficients")
@@ -947,9 +954,7 @@ def _exposure_records(
                 "exposure_name": name,
                 "observations": int(mask.sum()),
                 "benchmark_value": 0.0,
-                "portfolio_value": float(
-                    np.average(score[mask], weights=weights[mask])
-                ),
+                "portfolio_value": float(np.average(score[mask], weights=weights[mask])),
                 "exposure_value": float(np.average(score[mask], weights=weights[mask])),
                 "sampling_standard_error": 0.0,
                 "exposure_limit": 1e-8,
@@ -980,9 +985,7 @@ def _exposure_records(
             benchmark = float(benchmark_industry.get(name, 0.0))
             portfolio = float(portfolio_industry.get(name, 0.0))
             active = portfolio - benchmark
-            standard_error = math.sqrt(
-                benchmark * (1.0 - benchmark) / len(group)
-            )
+            standard_error = math.sqrt(benchmark * (1.0 - benchmark) / len(group))
             exposure_limit = max(
                 spec.industry_active_weight_floor,
                 spec.exposure_sampling_sigma_multiplier * standard_error,
@@ -1007,9 +1010,7 @@ def _exposure_records(
             )
         portfolio_size = float(group["log_market_cap_z"].mean())
         size_active = portfolio_size - benchmark_size
-        size_standard_error = float(frame["log_market_cap_z"].std(ddof=0)) / math.sqrt(
-            len(group)
-        )
+        size_standard_error = float(frame["log_market_cap_z"].std(ddof=0)) / math.sqrt(len(group))
         size_limit = max(
             spec.log_market_cap_z_floor,
             spec.exposure_sampling_sigma_multiplier * size_standard_error,
@@ -1028,9 +1029,7 @@ def _exposure_records(
                 "sampling_standard_error": size_standard_error,
                 "exposure_limit": size_limit,
                 "standardized_exposure": (
-                    abs(size_active) / size_standard_error
-                    if size_standard_error > 0
-                    else np.nan
+                    abs(size_active) / size_standard_error if size_standard_error > 0 else np.nan
                 ),
             }
         )
@@ -1065,9 +1064,7 @@ def _weighted_correlation(left: np.ndarray, right: np.ndarray, weights: np.ndarr
     left_centered = left - float(np.sum(weight * left))
     right_centered = right - float(np.sum(weight * right))
     covariance = float(np.sum(weight * left_centered * right_centered))
-    variance = float(
-        np.sum(weight * left_centered**2) * np.sum(weight * right_centered**2)
-    )
+    variance = float(np.sum(weight * left_centered**2) * np.sum(weight * right_centered**2))
     return covariance / math.sqrt(variance) if variance > 0 else np.nan
 
 
@@ -1079,11 +1076,7 @@ def _newey_west_mean_t(values: np.ndarray, lags: int) -> float:
         return np.nan
     long_run_variance = _newey_west_long_run_variance(array, lags)
     variance_of_mean = max(long_run_variance, 0.0) / count
-    return (
-        float(np.mean(array) / math.sqrt(variance_of_mean))
-        if variance_of_mean > 0
-        else np.nan
-    )
+    return float(np.mean(array) / math.sqrt(variance_of_mean)) if variance_of_mean > 0 else np.nan
 
 
 def _newey_west_long_run_variance(values: np.ndarray, lags: int) -> float:
