@@ -29,6 +29,7 @@ class BacktestSpec:
     unfilled_order_policy: str = "cancel_and_rebuild_from_active_target"
     max_stale_valuation_sessions: int = 20
     target_weight_tolerance: float = 1e-6
+    terminal_delisting_policy: str = "zero_recovery_at_delist_open_v1"
     version: str = "a_share_daily_portfolio_backtest_v2_p063"
 
     def validate(self) -> "BacktestSpec":
@@ -40,6 +41,8 @@ class BacktestSpec:
             raise ValueError("max_stale_valuation_sessions must be positive")
         if self.target_weight_tolerance < 0:
             raise ValueError("target_weight_tolerance must be non-negative")
+        if self.terminal_delisting_policy != "zero_recovery_at_delist_open_v1":
+            raise ValueError("unsupported terminal_delisting_policy")
         return self
 
     @property
@@ -83,7 +86,13 @@ def run_portfolio_backtest(
     market = _prepare_market(tradability, capacity_panel, relevant_ids)
     calendar = pd.DatetimeIndex(market["trade_date"].unique()).sort_values()
     frozen_targets = _prepare_targets(targets, market, calendar, bt_spec)
-    actions = _prepare_corporate_actions(corporate_actions, market, calendar)
+    terminal_actions = _p05_terminal_delisting_actions(market, calendar)
+    action_inputs = (
+        pd.concat([corporate_actions, terminal_actions], ignore_index=True)
+        if corporate_actions is not None and not corporate_actions.empty
+        else terminal_actions
+    )
+    actions = _prepare_corporate_actions(action_inputs, market, calendar)
     seeded = _prepare_initial_positions(initial_positions)
     if not set(seeded["instrument_id"]).issubset(set(market["instrument_id"])):
         raise ExecutionError("initial position is outside the backtest market")
@@ -688,6 +697,52 @@ def _prepare_corporate_actions(
     if (result["available_at"] > processing_deadline).any():
         raise ExecutionError("corporate action was unavailable before its processing session")
     return result[columns].sort_values(["processing_date", "processing_stage", "action_id"])
+
+
+def _p05_terminal_delisting_actions(
+    market: pd.DataFrame, calendar: pd.DatetimeIndex
+) -> pd.DataFrame:
+    """Create same-day zero-recovery terminal events from P0.5 delist dates."""
+    columns = [
+        "action_id",
+        "instrument_id",
+        "symbol",
+        "action_type",
+        "announcement_at",
+        "available_at",
+        "ex_date",
+        "settlement_price",
+    ]
+    if "delist_date" not in market:
+        return pd.DataFrame(columns=columns)
+    events = market[["instrument_id", "symbol", "delist_date"]].drop_duplicates()
+    events["delist_date"] = pd.to_datetime(
+        events["delist_date"], errors="coerce"
+    ).dt.normalize()
+    events = events.loc[
+        events["delist_date"].notna()
+        & events["delist_date"].between(calendar.min(), calendar.max())
+    ].copy()
+    if events.empty:
+        return pd.DataFrame(columns=columns)
+    if events.duplicated("instrument_id").any():
+        raise ExecutionError("P0.5 contains conflicting delist dates per instrument")
+    local_available = (
+        events["delist_date"] + pd.Timedelta(hours=8, minutes=40)
+    ).dt.tz_localize("Asia/Shanghai").dt.tz_convert("UTC")
+    events["action_id"] = events.apply(
+        lambda row: (
+            "p05_terminal_writeoff:"
+            f"{row['instrument_id']}:{row['delist_date'].date()}"
+        ),
+        axis=1,
+    )
+    events["action_type"] = "delisting_cash_settlement"
+    events["announcement_at"] = local_available
+    events["available_at"] = local_available
+    events["ex_date"] = events["delist_date"]
+    events["settlement_price"] = 0.0
+    return events[columns]
 
 
 def _target_activation_schedule(

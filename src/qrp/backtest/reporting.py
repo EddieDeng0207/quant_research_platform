@@ -55,6 +55,7 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
         f"- 情景：{quality['scenarios']}",
         f"- 订单/执行记录：{quality['orders']}/{quality['executions']}",
         f"- 公司行为事件：{quality['corporate_action_events']}",
+        f"- 退市零回收写销事件：{quality.get('terminal_zero_recovery_writeoff_events', 0)}",
         (
             "- 最大估值陈旧交易日/超限证券数："
             f"{quality.get('maximum_observed_stale_valuation_sessions', 0)}/"
@@ -118,6 +119,7 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
             "- 冲击按滞后20日个股波动率与成交额参与率的平方根计算；超过冲击容忍度时缩减成交量，不截断成本。",
             "- 小额订单抑制只作用于常规再平衡，完整退出仍强制保留。",
             "- 超过冻结上限的停牌估值只按最后可观察收盘价继续记账以量化影响；该情况会阻止晋级，不能据此发布投资结论。",
+            "- 持仓跨越 P0.5 退市日时按零回收保守写销；未来接入实际三板回收数据必须生成新版本。",
             "- 策略表现与容量应一起阅读；任何单一最优情景不得被单独选择展示。",
             "",
         ]

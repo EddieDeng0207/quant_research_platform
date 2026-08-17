@@ -16,6 +16,7 @@ from qrp.backtest.artifact import (
     _validate_corporate_action_input,
     backtest_quality_summary,
 )
+from qrp.backtest.engine import _p05_terminal_delisting_actions
 from qrp.execution import ExecutionSpec
 from qrp.execution.daily import ExecutionError
 from qrp.execution.scenarios import ExecutionScenario
@@ -269,6 +270,19 @@ def test_stale_valuation_is_persisted_but_blocks_promotion():
     assert not quality["promotion_passed"]
     assert quality["hard_failures"]["stale_valuation_breach_rows"] == 1
     assert quality["stale_valuation_breach_instruments"] == 1
+
+
+def test_p05_delist_date_creates_zero_recovery_terminal_event():
+    market = _market().copy()
+    market["delist_date"] = pd.Timestamp("2024-01-04")
+    calendar = pd.DatetimeIndex(market["trade_date"].unique()).sort_values()
+    actions = _p05_terminal_delisting_actions(market, calendar)
+    assert len(actions) == 1
+    assert actions.iloc[0]["action_type"] == "delisting_cash_settlement"
+    assert actions.iloc[0]["settlement_price"] == 0.0
+    assert actions.iloc[0]["available_at"] < pd.Timestamp(
+        "2024-01-04T01:30:00Z"
+    )
 
 
 def test_backtest_artifact_is_promoted_and_deterministic():

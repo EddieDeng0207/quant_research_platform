@@ -207,6 +207,7 @@ def build_backtest_artifact(
             "raw_prices_for_execution_and_valuation": True,
             "stale_last_close_is_diagnostic_only_beyond_frozen_limit": True,
             "stale_valuation_breach_blocks_promotion": True,
+            "p05_delisting_zero_recovery_terminal_writeoff": True,
             "cash_dividend_record_ex_pay_separation": True,
             "dividend_receivables_in_nav": True,
             "independent_scenario_ledgers": True,
@@ -421,6 +422,11 @@ def backtest_quality_summary(
         "executions": len(executions),
         "suppressed_orders": len(result.suppressed_orders),
         "corporate_action_events": len(result.corporate_action_ledger),
+        "terminal_zero_recovery_writeoff_events": int(
+            result.corporate_action_ledger.get(
+                "action_type", pd.Series(dtype=str)
+            ).eq("delisting_cash_settlement").sum()
+        ),
         "maximum_observed_stale_valuation_sessions": int(
             stale_sessions.max() if not stale_sessions.empty else 0
         ),
