@@ -12,7 +12,15 @@ import pandas as pd
 from .backtest import BacktestSpec, build_backtest_artifact, generate_backtest_report
 from .config import load_env_file
 from .data.audit import audit_lake, write_audit_report
-from .data.corporate_actions import build_corporate_action_artifact
+from .data.corporate_action_ingestion import (
+    CorporateActionBackfillConfig,
+    CorporateActionIngestionRunner,
+    frozen_symbols_from_tradability,
+)
+from .data.corporate_actions import (
+    build_corporate_action_artifact,
+    build_corporate_action_artifact_from_ingestion_run,
+)
 from .data.curated import build_curated_price_artifact
 from .data.fundamental_ingestion import (
     FUNDAMENTAL_STATEMENTS,
@@ -136,6 +144,24 @@ def _build_parser() -> argparse.ArgumentParser:
     actions.add_argument("--start", required=True, help="announcement start date")
     actions.add_argument("--end", required=True, help="announcement end date")
     actions.add_argument("--data-root", default="data/lake")
+
+    action_backfill = subparsers.add_parser(
+        "backfill-corporate-actions",
+        help="run or resume P0.6.3 full-universe dividend/bonus ingestion",
+    )
+    action_backfill.add_argument("--tradability-artifact", required=True)
+    action_backfill.add_argument("--start", required=True, help="announcement start date")
+    action_backfill.add_argument("--end", required=True, help="announcement end date")
+    action_backfill.add_argument(
+        "--requests-per-minute", type=int, default=DEFAULT_REQUESTS_PER_MINUTE
+    )
+    action_backfill.add_argument("--max-attempts", type=int, default=3)
+    action_backfill.add_argument("--retry-base-seconds", type=float, default=2.0)
+    action_backfill.add_argument("--workers", type=int, default=4)
+    action_backfill.add_argument("--job-name", default="p063_corporate_actions_backfill")
+    action_backfill.add_argument("--data-root", default="data/lake")
+    action_backfill.add_argument("--artifact-root", default="artifacts")
+    action_backfill.add_argument("--state-root", default="state")
 
     macro = subparsers.add_parser("macro", help="ingest FRED/ALFRED observations")
     macro.add_argument("--provider", choices=("fred",), default="fred")
@@ -432,7 +458,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "build-corporate-actions",
         help="build causal implementation events from explicit raw snapshots",
     )
-    build_actions.add_argument("--raw", action="append", required=True)
+    action_source = build_actions.add_mutually_exclusive_group(required=True)
+    action_source.add_argument("--raw", action="append")
+    action_source.add_argument("--ingestion-run")
     build_actions.add_argument("--tradability-artifact", required=True)
     build_actions.add_argument("--output-root", default="data/curated")
     build_actions.add_argument("--allow-failed-promotion", action="store_true")
@@ -654,12 +682,20 @@ def main(argv: List[str] = None) -> int:
         print(f"built execution calibration artifact -> {output}")
         return 0
     if args.command == "build-corporate-actions":
-        output = build_corporate_action_artifact(
-            [Path(path) for path in args.raw],
-            Path(args.tradability_artifact),
-            Path(args.output_root),
-            strict=not args.allow_failed_promotion,
-        )
+        if args.ingestion_run:
+            output = build_corporate_action_artifact_from_ingestion_run(
+                Path(args.ingestion_run),
+                Path(args.tradability_artifact),
+                Path(args.output_root),
+                strict=not args.allow_failed_promotion,
+            )
+        else:
+            output = build_corporate_action_artifact(
+                [Path(path) for path in args.raw],
+                Path(args.tradability_artifact),
+                Path(args.output_root),
+                strict=not args.allow_failed_promotion,
+            )
         print(f"built corporate-action artifact -> {output}")
         return 0
     if args.command == "build-backtest":
@@ -907,6 +943,33 @@ def main(argv: List[str] = None) -> int:
                 state_root=Path(args.state_root),
             ).run(config)
             print(f"completed P0 ingestion -> {run_path}")
+            return 0
+
+        if args.command == "backfill-corporate-actions":
+            symbols, universe = frozen_symbols_from_tradability(
+                Path(args.tradability_artifact)
+            )
+            provider = create_provider("tushare")
+            output = CorporateActionIngestionRunner(
+                provider=provider,
+                lake=ParquetLake(Path(args.data_root)),
+                artifact_root=Path(args.artifact_root),
+                state_root=Path(args.state_root),
+            ).run(
+                CorporateActionBackfillConfig(
+                    start_date=args.start,
+                    end_date=args.end,
+                    symbols=symbols,
+                    universe_artifact_id=universe["artifact_id"],
+                    universe_manifest_sha256=universe["manifest_sha256"],
+                    requests_per_minute=args.requests_per_minute,
+                    max_attempts=args.max_attempts,
+                    retry_base_seconds=args.retry_base_seconds,
+                    workers=args.workers,
+                    job_name=args.job_name,
+                )
+            )
+            print(f"completed corporate-action ingestion -> {output}")
             return 0
 
         provider = create_provider(args.provider)

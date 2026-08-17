@@ -227,6 +227,8 @@ def build_corporate_action_artifact(
     output_root: Path,
     *,
     strict: bool = True,
+    queried_symbols: Optional[Sequence[str]] = None,
+    query_run_identity: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Build an immutable canonical action artifact from explicit raw snapshots."""
     paths = [Path(path) for path in raw_paths]
@@ -242,14 +244,51 @@ def build_corporate_action_artifact(
         raise CorporateActionError("P0.5 artifact did not pass promotion")
     if _sha256(market_path) != p05_manifest.get("output", {}).get("sha256"):
         raise CorporateActionError("P0.5 Parquet hash does not match its manifest")
+    if query_run_identity is not None and (
+        query_run_identity.get("universe_artifact_id") != p05_manifest.get("artifact_id")
+        or query_run_identity.get("universe_manifest_sha256") != _sha256(manifest_path)
+    ):
+        raise CorporateActionError(
+            "corporate-action query universe does not match the requested P0.5 artifact"
+        )
     for path in paths:
         if not path.exists():
             raise CorporateActionError(f"raw corporate-action file not found: {path}")
-    raw = pd.concat([pd.read_parquet(path) for path in paths], ignore_index=True)
+    raw_frames = [pd.read_parquet(path) for path in paths]
+    empty_raw_snapshot_files = sum(frame.empty for frame in raw_frames)
+    raw = pd.concat(raw_frames, ignore_index=True)
     raw = raw.sort_values(["source_action_id", "ingested_at"]).drop_duplicates(
         "source_action_id", keep="last"
     )
-    events, quality = build_corporate_action_events(raw, pd.read_parquet(market_path))
+    market = pd.read_parquet(market_path)
+    events, quality = build_corporate_action_events(raw, market)
+    p05_symbols = set(market["symbol"].dropna().astype(str))
+    frozen_queries = set(str(value) for value in (queried_symbols or ()))
+    if queried_symbols is None:
+        missing_query_symbols: list[str] = []
+        query_coverage = None
+    else:
+        missing_query_symbols = sorted(p05_symbols - frozen_queries)
+        query_coverage = (
+            len(p05_symbols & frozen_queries) / len(p05_symbols) if p05_symbols else 0.0
+        )
+        quality["hard_failures"]["unqueried_p05_symbols"] = len(
+            missing_query_symbols
+        )
+        quality["promotion_passed"] = all(
+            value == 0 for value in quality["hard_failures"].values()
+        )
+    quality.update(
+        {
+            "p05_universe_symbols": len(p05_symbols),
+            "queried_symbols": len(frozen_queries) if queried_symbols is not None else None,
+            "query_coverage": query_coverage,
+            "query_coverage_proven": queried_symbols is not None,
+            "missing_query_symbol_sample": missing_query_symbols[:20],
+            "raw_snapshot_files": len(paths),
+            "empty_raw_snapshot_files": empty_raw_snapshot_files,
+        }
+    )
     identity = {
         "p05_artifact_id": p05_manifest["artifact_id"],
         "p05_manifest_sha256": _sha256(manifest_path),
@@ -258,6 +297,7 @@ def build_corporate_action_artifact(
         ],
         "policy_version": "tushare_implemented_dividend_pit_v1",
         "implementation_sha256": _sha256(Path(__file__)),
+        "query_run": query_run_identity,
     }
     artifact_id = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -280,6 +320,7 @@ def build_corporate_action_artifact(
             "cash_and_share_legs_are_separate": True,
             "gross_dividend_tax_policy_explicit": True,
             "instrument_identity_from_promoted_p05": True,
+            "full_universe_query_coverage_proven": queried_symbols is not None,
         },
     }
     _write_immutable_json(manifest, destination / "manifest.json")
@@ -289,6 +330,27 @@ def build_corporate_action_artifact(
             f"{quality['hard_failures']}"
         )
     return destination
+
+
+def build_corporate_action_artifact_from_ingestion_run(
+    ingestion_run: Path,
+    tradability_artifact: Path,
+    output_root: Path,
+    *,
+    strict: bool = True,
+) -> Path:
+    """Build a canonical artifact only after proving every P0.5 symbol was queried."""
+    from .corporate_action_ingestion import load_completed_corporate_action_run
+
+    paths, symbols, identity = load_completed_corporate_action_run(ingestion_run)
+    return build_corporate_action_artifact(
+        paths,
+        tradability_artifact,
+        output_root,
+        strict=strict,
+        queried_symbols=symbols,
+        query_run_identity=identity,
+    )
 
 
 def _covered_session(date: Any, calendar: pd.DatetimeIndex) -> Optional[pd.Timestamp]:

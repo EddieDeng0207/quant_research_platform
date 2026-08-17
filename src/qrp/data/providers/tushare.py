@@ -676,6 +676,7 @@ class TushareProvider:
                 "contains_proposal_and_implementation_versions": True,
                 "pagination": pagination,
             },
+            partition_values={"symbol": canonical},
         ).validate()
 
     def fetch_stock_status_by_date(self, trade_date: str) -> FetchResult:
