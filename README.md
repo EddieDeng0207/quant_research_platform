@@ -98,10 +98,62 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 .venv/bin/qrp-data backfill-p0 \
   --start 2024-01-02 \
   --end 2024-01-05 \
-  --requests-per-minute 250
+  --workers 8 \
+  --requests-per-minute 400
 ```
 
 任务按交易日分别拉取全市场未复权行情、复权因子和每日市值指标。每个成功任务立即写入 checkpoint；相同配置再次运行时自动跳过已完成任务。
+
+运行或续跑全市场财务数据任务（正式多年任务前先用 `--symbol` 做小样本验证）：
+
+```bash
+.venv/bin/qrp-data backfill-fundamentals \
+  --start 2014-01-01 \
+  --end 2026-08-14 \
+  --by-period-vip \
+  --workers 8 \
+  --requests-per-minute 400
+```
+
+正式全市场任务优先按“报表 × 报告期”调用 VIP 全市场接口；普通权限仍可按
+“报表 × 股票”保存不可变快照。三张报表的普通接口日期参数表示公告日范围；
+`financial_indicators` 表示报告期范围。零行会保存为已覆盖快照。财务指标达到供应商
+100 行返回上限时任务失败并要求缩短区间，不接受可能被截断的数据。
+
+从完成的运行和冻结交易日历构建 P0.8 财务 PIT artifact：
+
+```bash
+.venv/bin/qrp-data build-fundamentals-pit \
+  --run artifacts/ingestion_runs/<run_id> \
+  --calendar data/lake/raw/provider=tushare/dataset=trading_calendar/<file>.parquet
+```
+
+正式回补前可生成研究就绪缺口报告：
+
+```bash
+.venv/bin/qrp-data audit-research-readiness \
+  --start 2018-01-01 \
+  --end 2026-08-14 \
+  --calendar <calendar.parquet> \
+  --fundamental-artifact <fundamental_artifact> \
+  --industry-membership <historical_industry.parquet>
+```
+
+完整的双时间、修订选择和晋级规则见
+`docs/p08_fundamental_pit_standard.md`。
+
+历史行业归属使用申万2014/2021两个版本的历史成员区间，不允许把新版分类回填旧时期：
+
+```bash
+.venv/bin/qrp-data backfill-industry --requests-per-minute 400
+.venv/bin/qrp-data build-industry-pit \
+  --run <completed_run> \
+  --start 2016-01-01 \
+  --end 2026-08-14
+```
+
+分类体系在2021-12-13切换，完整标准见
+`docs/p08_historical_industry_standard.md`。
 
 接入并构建 P0.5 可交易性矩阵：
 
@@ -109,7 +161,7 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 .venv/bin/qrp-data backfill-p05 \
   --start 2024-01-02 \
   --end 2024-01-05 \
-  --requests-per-minute 250
+  --requests-per-minute 400
 
 .venv/bin/qrp-data build-tradability \
   --start 2024-01-02 \
@@ -118,7 +170,7 @@ CLI 会自动读取项目根目录下、已被 Git 忽略的 `.env`，但任何�
 
 `backfill-p05` 冻结历史股票池、未复权行情、官方涨跌停价、停复牌事件、ST 状态、当前证券主数据和北交所新旧代码映射。构建阶段默认 fail closed：无法解释的缺行情、有行情却缺涨跌停记录或价格越过官方边界，都会阻止产物晋级。详细规则见 `docs/p05_tradability_standard.md`。
 
-批量接入默认使用 250 次/分钟（每次真实 API 调用间隔 0.24 秒，分页和重试也分别计数）。分页不是统一填一个任意大值，而是使用各接口审阅后的最大页长：`daily/adj_factor/daily_basic/stock_basic=6000`、`stk_limit=5800`、`bak_basic=7000`、`suspend_d=5000`、`stock_st/bse_mapping=1000`、`dividend=2000`。每次写入同时记录页长、请求页数和总行数；发现供应商忽略 offset 并返回重复页时立即失败。分页策略版本 `p0_tushare_max_page_v2_rpm250` 进入 checkpoint 数据身份，因此旧限速/旧分页任务不会让升级后的运行错误跳过。
+批量接入默认使用 400 次/分钟（每次真实 API 调用间隔 0.15 秒，分页和重试也分别计数）。分页不是统一填一个任意大值，而是使用各接口审阅后的最大页长：`daily/adj_factor/daily_basic/stock_basic=6000`、`stk_limit=5800`、`bak_basic=7000`、`suspend_d=5000`、`stock_st/bse_mapping=1000`、`dividend=2000`。每次写入同时记录页长、请求页数和总行数；发现供应商忽略 offset 并返回重复页时立即失败。摄取策略版本 `p0_tushare_max_page_v3_rpm400_vendor_sentinels_master_interval_fallback` 进入 checkpoint 数据身份，因此旧限速、旧分页或旧历史缺失处理任务不会让升级后的运行错误跳过。
 
 从冻结订单和已晋级 P0.5 产物构建 P0.6 执行审计：
 
@@ -242,7 +294,6 @@ HAC 统计、Top/Bottom 真实组合暴露、换手和年度稳定性评测；�
 - manifest 已增加进程级文件锁；同一 checkpoint 当前仍只允许一个编排进程写入。未来并行 Agent 共享任务状态前，需要增加 checkpoint 锁或迁移到事务型任务存储。
 - AKShare 股票列表只有当前截面，不能用于历史股票池。
 - Tushare 权限受积分影响；当前全市场任务已实现分页、限流、指数退避和断点续传。
-- 财报已保留公告日、实际公告日和修订行，但 Point-in-Time 去重规则会在 curated 层实现。
-- 当前已实现通用的下一交易日可用时间函数；财报 curated 去重仍需在因子层接入该规则。
+- 财报 raw 接口已保留公告日、实际公告日和修订行；P0.8 已实现全市场断点任务、下一交易日可用时间、不可变版本索引和决策时点版本选择。正式多年回补尚未执行。
 - 分析师一致预期必须使用能够提供历史快照/变更时间的数据源后再接入。
 - P0.6.1 已提供真实券商成交校准产物和最小样本门禁，但在导入真实成交回报前，滑点参数仍明确标记为研究假设；日线无法证明盘口排队或集合竞价实际成交。

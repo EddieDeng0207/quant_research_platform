@@ -38,6 +38,8 @@ class FakeTushareClient:
             }
         )
 
+    income_vip = income
+
     @staticmethod
     def adj_factor(**kwargs):
         return pd.DataFrame(
@@ -142,6 +144,32 @@ class FakeTushareClient:
             }
         )
 
+    @staticmethod
+    def index_classify(**kwargs):
+        return pd.DataFrame(
+            {
+                "index_code": ["801780.SI"],
+                "industry_name": ["银行"],
+                "level": ["L1"],
+                "industry_code": ["480000"],
+                "is_pub": [1],
+                "parent_code": ["0"],
+                "src": [kwargs["src"]],
+            }
+        )
+
+    @staticmethod
+    def index_member(**kwargs):
+        return pd.DataFrame(
+            {
+                "index_code": [kwargs["index_code"]],
+                "con_code": ["000001.SZ"],
+                "in_date": ["19910403"],
+                "out_date": [None],
+                "is_new": ["Y"],
+            }
+        )
+
 
 class TushareProviderTests(unittest.TestCase):
     def setUp(self):
@@ -155,11 +183,88 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(row["amount"], 129150.0)
 
     def test_fundamental_uses_actual_announcement_date(self):
-        row = self.provider.fetch_fundamentals(
+        result = self.provider.fetch_fundamentals(
             "income", "000001.SZ", "2024-01-01", "2024-12-31"
-        ).frame.iloc[0]
+        )
+        row = result.frame.iloc[0]
         self.assertEqual(row["report_period"], pd.Timestamp("2024-03-31"))
         self.assertEqual(row["available_date"], pd.Timestamp("2024-04-22"))
+        self.assertEqual(row["statement_type"], "income")
+        self.assertEqual(len(row["source_row_sha256"]), 64)
+        self.assertEqual(result.partition_values, {"symbol": "000001.SZ"})
+
+    def test_vip_fundamental_is_partitioned_by_report_period(self):
+        result = self.provider.fetch_fundamentals_by_period("income", "2024-03-31")
+        self.assertEqual(result.frame.iloc[0]["symbol"], "000001.SZ")
+        self.assertEqual(result.query["endpoint"], "income_vip")
+        self.assertEqual(result.partition_values, {"report_period": "2024-03-31"})
+        self.assertEqual(
+            result.metadata["request_axis"], "full_market_report_period"
+        )
+
+    def test_vip_fundamental_marks_nonstandard_vendor_codes_without_guessing(self):
+        class NonstandardVipClient(FakeTushareClient):
+            @staticmethod
+            def income_vip(**kwargs):
+                frame = FakeTushareClient.income(**kwargs)
+                frame["ts_code"] = "X24035.BJ"
+                return frame
+
+        result = TushareProvider(
+            client=NonstandardVipClient()
+        ).fetch_fundamentals_by_period("income", "2024-03-31")
+        row = result.frame.iloc[0]
+        self.assertEqual(row["source_symbol"], "X24035.BJ")
+        self.assertEqual(row["symbol"], "X24035.BJ")
+        self.assertEqual(row["instrument_kind"], "vendor_nonstandard")
+
+    def test_vip_fundamental_quarantines_missing_announcement_date(self):
+        class MissingAnnouncementClient(FakeTushareClient):
+            @staticmethod
+            def income_vip(**kwargs):
+                frame = FakeTushareClient.income(**kwargs)
+                frame["ann_date"] = None
+                frame["f_ann_date"] = None
+                return frame
+
+        row = TushareProvider(
+            client=MissingAnnouncementClient()
+        ).fetch_fundamentals_by_period("income", "2024-03-31").frame.iloc[0]
+        self.assertFalse(row["pit_eligible"])
+        self.assertEqual(row["pit_exclusion_reason"], "missing_announcement_date")
+
+    def test_empty_fundamental_response_is_a_valid_zero_row_snapshot(self):
+        class EmptyIncomeClient(FakeTushareClient):
+            @staticmethod
+            def income(**kwargs):
+                return pd.DataFrame()
+
+        result = TushareProvider(client=EmptyIncomeClient()).fetch_fundamentals(
+            "income", "000001.SZ", "2024-01-01", "2024-12-31"
+        )
+        self.assertTrue(result.frame.empty)
+        self.assertTrue(result.metadata["empty_snapshot_is_valid"])
+
+    def test_financial_indicator_fails_closed_at_documented_row_limit(self):
+        class TruncatedIndicatorClient(FakeTushareClient):
+            @staticmethod
+            def fina_indicator(**kwargs):
+                return pd.DataFrame(
+                    {
+                        "ts_code": ["000001.SZ"] * 100,
+                        "ann_date": ["20240420"] * 100,
+                        "end_date": ["20240331"] * 100,
+                    }
+                )
+
+        provider = TushareProvider(client=TruncatedIndicatorClient())
+        with self.assertRaisesRegex(ProviderError, "100-row response limit"):
+            provider.fetch_fundamentals(
+                "financial_indicators",
+                "000001.SZ",
+                "2000-01-01",
+                "2024-12-31",
+            )
 
     def test_full_market_daily_partitions_by_trade_date(self):
         result = self.provider.fetch_daily_bars_by_date("2024-01-02")
@@ -176,6 +281,35 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(adjustment.frame.iloc[0]["adj_factor"], 1.23)
         self.assertEqual(indicators.frame.iloc[0]["total_mv"], 1_000_000.0)
         self.assertEqual(indicators.frame.iloc[0]["circ_mv"], 800_000.0)
+
+    def test_historical_industry_contract_preserves_source_intervals(self):
+        classification = self.provider.fetch_industry_classification("SW2014")
+        row = classification.frame.iloc[0]
+        members = self.provider.fetch_industry_members(
+            "SW2014",
+            row["source_index_code"],
+            row["industry_code"],
+            row["industry_name"],
+        )
+        member = members.frame.iloc[0]
+        self.assertEqual(member["symbol"], "000001.SZ")
+        self.assertEqual(member["taxonomy"], "SW2014")
+        self.assertEqual(member["source_membership_start"], pd.Timestamp("1991-04-03"))
+        self.assertTrue(pd.isna(member["source_membership_end"]))
+
+    def test_historical_industry_preserves_legacy_instrument_identity(self):
+        class LegacyIndustryClient(FakeTushareClient):
+            @staticmethod
+            def index_member(**kwargs):
+                frame = FakeTushareClient.index_member(**kwargs)
+                frame["con_code"] = "T00018.SH"
+                return frame
+
+        provider = TushareProvider(client=LegacyIndustryClient())
+        member = provider.fetch_industry_members(
+            "SW2014", "801780.SI", "480000", "银行"
+        ).frame.iloc[0]
+        self.assertEqual(member["symbol"], "T00018.SH")
 
     def test_stock_status_contract(self):
         row = self.provider.fetch_stock_status_by_date("2024-01-02").frame.iloc[0]
@@ -201,6 +335,20 @@ class TushareProviderTests(unittest.TestCase):
             "2024-01-02"
         )
         self.assertTrue(pd.isna(result.frame.iloc[0]["pre_close"]))
+
+    def test_daily_limit_normalizes_vendor_zero_pre_close_sentinel(self):
+        class ZeroPreCloseClient(FakeTushareClient):
+            @staticmethod
+            def stk_limit(**kwargs):
+                frame = FakeTushareClient.stk_limit(**kwargs)
+                frame["pre_close"] = 0.0
+                return frame
+
+        result = TushareProvider(client=ZeroPreCloseClient()).fetch_daily_limits_by_date(
+            "2016-01-04"
+        )
+        self.assertTrue(pd.isna(result.frame.iloc[0]["pre_close"]))
+        self.assertEqual(result.metadata["zero_pre_close_normalized_to_null_rows"], 1)
 
     def test_daily_limit_preserves_explicit_no_limit_sentinel(self):
         class NoLimitClient(FakeTushareClient):
@@ -235,6 +383,39 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(result.frame.iloc[0]["symbol"], "000001.SZ")
         self.assertEqual(result.partition_values, {"trade_date": "2024-01-02"})
 
+    def test_empty_historical_snapshot_uses_all_status_master_intervals(self):
+        class EmptyHistoricalClient(FakeTushareClient):
+            @staticmethod
+            def bak_basic(**kwargs):
+                return pd.DataFrame()
+
+            @staticmethod
+            def stock_basic(**kwargs):
+                return pd.DataFrame(
+                    {
+                        "ts_code": ["000001.SZ", "000002.SZ", "000003.SZ"],
+                        "symbol": ["000001", "000002", "000003"],
+                        "name": ["存续", "已退市", "未上市"],
+                        "area": ["深圳", "深圳", "深圳"],
+                        "industry": ["银行", "地产", "制造"],
+                        "market": ["主板", "主板", "主板"],
+                        "exchange": ["SZSE", "SZSE", "SZSE"],
+                        "list_status": [kwargs["list_status"]] * 3,
+                        "list_date": ["19910403", "19920101", "20250101"],
+                        "delist_date": [None, "20230101", None],
+                    }
+                )
+
+        provider = TushareProvider(client=EmptyHistoricalClient())
+        provider.fetch_instruments(statuses=("L",))
+        result = provider.fetch_historical_instruments_by_date("2024-01-02")
+        self.assertEqual(result.frame["symbol"].tolist(), ["000001.SZ"])
+        self.assertTrue(result.metadata["bak_basic_empty_fallback_used"])
+        self.assertEqual(
+            result.frame.iloc[0]["universe_snapshot_method"],
+            "all_status_security_master_effective_interval",
+        )
+
     def test_bse_mapping_preserves_both_codes_and_listing_date(self):
         result = self.provider.fetch_security_code_mappings()
         row = result.frame.iloc[0]
@@ -267,6 +448,12 @@ class TushareProviderTests(unittest.TestCase):
                 "bak_basic": 7000,
                 "bse_mapping": 1000,
                 "dividend": 2000,
+                "index_classify": 1000,
+                "index_member": 2000,
+                "income_vip": 9000,
+                "balancesheet_vip": 9000,
+                "cashflow_vip": 9000,
+                "fina_indicator_vip": 9000,
             },
         )
 

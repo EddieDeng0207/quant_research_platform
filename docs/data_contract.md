@@ -7,7 +7,9 @@
 - `announcement_date`：供应商提供的公告日期。
 - `actual_announcement_date`：供应商提供的实际公告日期。
 - `available_date`：研究系统允许使用该记录的最早日期；当前规则为实际公告日优先，否则使用公告日。
+- `available_at`：把日期级公告按冻结交易日历映射后的最早系统可用时刻；财报默认下一交易日 09:30。
 - `ingested_at`：平台获取数据的 UTC 时间，不等于历史可用时间。
+- `research_as_of_at`：一次研究冻结的数据快照截止时间，要求 `ingested_at <= research_as_of_at`。
 - `realtime_start/realtime_end`：FRED/ALFRED 中一个观测版本成立的实时区间。
 
 ## 行情单位
@@ -27,8 +29,9 @@
 
 ## P0.5 可交易性输入
 
-- `historical_instruments`：交易日历史股票池，必须含 `list_date`，不得用当前列表回填退市证券。
+- `historical_instruments`：交易日历史股票池，必须含 `list_date`。优先使用 `bak_basic`；供应商返回空快照时，允许用同次冻结、同时包含 L/D/P 状态的证券主表按 `[list_date, delist_date]` 有效区间重建。重建只决定当日是否已上市，退市边界不得作为研究特征暴露。
 - `daily_limits`：盘前涨停价、跌停价及可选 `pre_close`；显式的 `99999.99/0` 无涨跌停哨兵值原样保留。
+- 历史 `stk_limit` 的 `pre_close=0` 是缺失哨兵，规范化为 `NA` 并记录计数；上下限价格不得由此推导或覆盖。
 - `daily_suspensions`：`S` 停牌、`R` 复牌事件；零行是合法且有覆盖的事件快照，必须保存规范空表，不能与“请求缺失”混淆。
 - `stock_status`：风险警示状态；供应商权威历史起点为 2016-01-01，早于此日期禁止无替代源构建。
 - `security_code_mappings`：证券旧代码、新代码、名称与上市日；属于不可变全量快照。

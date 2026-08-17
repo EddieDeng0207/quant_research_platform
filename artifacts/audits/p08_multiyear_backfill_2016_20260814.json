@@ -1,0 +1,87 @@
+{
+  "recorded_on": "2026-08-17",
+  "requested_interval": {
+    "start_date": "2016-01-01",
+    "end_date": "2026-08-14",
+    "open_sessions": 2579
+  },
+  "ingestion_policy": {
+    "default_requests_per_minute": 400,
+    "minimum_request_start_interval_seconds": 0.15,
+    "workers": 4,
+    "max_attempts": 5,
+    "version": "p0_tushare_max_page_v3_rpm400_vendor_sentinels_master_interval_fallback",
+    "git_commit": "6154247",
+    "shared_rate_limiter_includes_pagination_and_retries": true
+  },
+  "completed_runs": [
+    {
+      "run_id": "20260817T004446Z_6f7254f5c0bf_7faa9c",
+      "start_date": "2016-01-01",
+      "end_date": "2022-12-31",
+      "open_sessions": 1703,
+      "daily_partitions": 8515,
+      "files_written_including_frozen_reference_inputs": 8518,
+      "rows_written": 20519207,
+      "elapsed_seconds": 2231.332914,
+      "failed_tasks": []
+    },
+    {
+      "run_id": "20260817T012226Z_e5011333a9fb_49042b",
+      "start_date": "2024-01-06",
+      "end_date": "2026-08-14",
+      "open_sessions": 630,
+      "daily_partitions": 3150,
+      "files_written_including_frozen_reference_inputs": 3153,
+      "rows_written": 11441718,
+      "elapsed_seconds": 1072.537965,
+      "failed_tasks": []
+    }
+  ],
+  "backfill_totals": {
+    "new_daily_partitions": 11665,
+    "rows_written": 31960925,
+    "elapsed_seconds": 3303.870879,
+    "previously_covered_open_sessions_not_refetched": 246
+  },
+  "vendor_history_diagnostics": {
+    "daily_limit_partitions_audited": 2579,
+    "zero_pre_close_normalized_to_null_days": 846,
+    "zero_pre_close_normalized_to_null_rows": 158345,
+    "zero_pre_close_first_date": "2016-01-04",
+    "zero_pre_close_last_date": "2019-06-25",
+    "zero_pre_close_days_by_year": {
+      "2016": 244,
+      "2017": 244,
+      "2018": 243,
+      "2019": 115
+    },
+    "historical_instrument_partitions_audited": 2579,
+    "bak_basic_empty_fallback_days": 172,
+    "bak_basic_fallback_first_date": "2016-01-04",
+    "bak_basic_fallback_last_date": "2021-03-16",
+    "bak_basic_fallback_days_by_year": {
+      "2016": 152,
+      "2017": 2,
+      "2019": 4,
+      "2020": 12,
+      "2021": 2
+    }
+  },
+  "guardrails": {
+    "zero_pre_close_is_preserved_as_missing_not_imputed": true,
+    "up_and_down_limits_are_not_recomputed": true,
+    "historical_universe_fallback_uses_all_status_master": true,
+    "historical_universe_reconstruction_is_bounded_by_list_and_delist_dates": true,
+    "future_event_boundaries_are_not_exposed_as_research_features": true,
+    "raw_files_are_append_only": true
+  },
+  "readiness": {
+    "report": "artifacts/audits/p08_readiness_2016_20260814_complete_v4.json",
+    "passed": true,
+    "missing_daily_partitions": 0,
+    "fundamental_artifact_missing_or_failed": 0,
+    "historical_industry_membership_missing_or_failed": 0,
+    "insufficient_weekly_periods": 0
+  }
+}

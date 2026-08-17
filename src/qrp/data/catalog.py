@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -27,6 +27,7 @@ def load_partitioned_snapshot(
     start_date: str,
     end_date: str,
     as_of_ingested_at: Optional[str] = None,
+    columns: Optional[Sequence[str]] = None,
 ) -> DatasetSnapshot:
     """Load the latest eligible file per trade-date partition without mixing vintages."""
     root = Path(lake_root)
@@ -40,7 +41,9 @@ def load_partitioned_snapshot(
     ingestion_cutoff = (
         pd.Timestamp(as_of_ingested_at).tz_convert("UTC")
         if as_of_ingested_at and pd.Timestamp(as_of_ingested_at).tzinfo
-        else pd.Timestamp(as_of_ingested_at, tz="UTC") if as_of_ingested_at else None
+        else pd.Timestamp(as_of_ingested_at, tz="UTC")
+        if as_of_ingested_at
+        else None
     )
     eligible = []
     for entry in entries:
@@ -69,10 +72,8 @@ def load_partitioned_snapshot(
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if digest != entry["sha256"]:
             raise IOError(f"Input hash mismatch: {path}")
-        frames.append(pd.read_parquet(path))
-    fingerprint_payload = [
-        {"path": entry["path"], "sha256": entry["sha256"]} for entry in selected
-    ]
+        frames.append(pd.read_parquet(path, columns=list(columns) if columns else None))
+    fingerprint_payload = [{"path": entry["path"], "sha256": entry["sha256"]} for entry in selected]
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -95,9 +96,7 @@ def load_latest_snapshot(
     root = Path(lake_root)
     manifest_path = root / "manifest.jsonl"
     entries = [
-        json.loads(line)
-        for line in manifest_path.read_text(encoding="utf-8").splitlines()
-        if line
+        json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line
     ]
     ingestion_cutoff = _utc_cutoff(as_of_ingested_at)
     eligible = [
@@ -105,10 +104,7 @@ def load_latest_snapshot(
         for entry in entries
         if entry.get("provider") == provider
         and entry.get("dataset") == dataset
-        and (
-            ingestion_cutoff is None
-            or pd.Timestamp(entry["written_at"]) <= ingestion_cutoff
-        )
+        and (ingestion_cutoff is None or pd.Timestamp(entry["written_at"]) <= ingestion_cutoff)
     ]
     if not eligible:
         raise FileNotFoundError(f"No eligible {provider}/{dataset} snapshot")

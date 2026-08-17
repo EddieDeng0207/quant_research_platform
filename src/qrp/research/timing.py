@@ -16,6 +16,7 @@ class FactorTimingContract:
     event_at_column: str
     available_at_column: str = "available_at"
     ingested_at_column: str = "ingested_at"
+    research_as_of_at_column: str = "research_as_of_at"
     decision_at_column: str = "decision_at"
     execution_at_column: str = "execution_at"
     vintage_column: Optional[str] = None
@@ -53,7 +54,7 @@ def validate_factor_timing(
     *,
     contract: Optional[FactorTimingContract] = None,
 ) -> Dict[str, int]:
-    """Validate event <= availability <= decision < execution and ingestion cutoffs."""
+    """Validate historical availability and the separately frozen ingestion vintage."""
     selected = contract or FACTOR_TIMING_CONTRACTS.get(family)
     if selected is None:
         raise ValueError(f"no factor timing contract registered for {family}")
@@ -61,6 +62,7 @@ def validate_factor_timing(
         selected.event_at_column,
         selected.available_at_column,
         selected.ingested_at_column,
+        selected.research_as_of_at_column,
         selected.decision_at_column,
         selected.execution_at_column,
     }
@@ -78,8 +80,13 @@ def validate_factor_timing(
     available_after_decision = (
         parsed[selected.available_at_column] > parsed[selected.decision_at_column]
     )
-    ingested_after_decision = (
-        parsed[selected.ingested_at_column] > parsed[selected.decision_at_column]
+    ingested_after_research_as_of = (
+        parsed[selected.ingested_at_column]
+        > parsed[selected.research_as_of_at_column]
+    )
+    decision_after_research_as_of = (
+        parsed[selected.decision_at_column]
+        > parsed[selected.research_as_of_at_column]
     )
     decision_not_before_execution = (
         parsed[selected.decision_at_column] >= parsed[selected.execution_at_column]
@@ -93,7 +100,15 @@ def validate_factor_timing(
         "null_or_invalid_timestamp_rows": int(null_rows.sum()),
         "event_after_available_rows": int(event_after_available.sum()),
         "available_after_decision_rows": int(available_after_decision.sum()),
-        "ingested_after_decision_rows": int(ingested_after_decision.sum()),
+        "ingested_after_research_as_of_rows": int(
+            ingested_after_research_as_of.sum()
+        ),
+        "decision_after_research_as_of_rows": int(
+            decision_after_research_as_of.sum()
+        ),
+        "multiple_research_as_of_values": int(
+            parsed[selected.research_as_of_at_column].nunique() != 1
+        ),
         "decision_not_before_execution_rows": int(decision_not_before_execution.sum()),
         "vintage_after_decision_rows": int(vintage_after_decision.sum()),
     }

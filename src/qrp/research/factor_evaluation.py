@@ -42,7 +42,7 @@ class FactorEvaluationSpec:
     annualization_frequency_tolerance: float = 0.15
     minimum_newey_west_lags: int = 1
     return_basis: str = "raw"
-    version: str = "p07_single_factor_evaluation_v3"
+    version: str = "p07_single_factor_evaluation_v4"
 
     def validate(self) -> "FactorEvaluationSpec":
         if not self.factor_name.strip():

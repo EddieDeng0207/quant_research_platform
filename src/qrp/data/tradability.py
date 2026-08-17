@@ -24,7 +24,7 @@ class TradabilitySpec:
     price_tolerance: float = 0.0051
     block_any_suspension_event: bool = True
     stock_status_history_start: str = "2016-01-01"
-    version: str = "a_share_daily_tradability_v4_bse_point_in_time_identity"
+    version: str = "a_share_daily_tradability_v5_code_identity_and_bse_domain"
 
     @property
     def fingerprint(self) -> str:
@@ -56,19 +56,16 @@ def build_tradability_matrix(
         )
     universe = _historical_universe(instruments, dates, historical_instruments)
     bse_aliases = _bse_symbol_aliases(security_code_mappings)
-    universe = _supplement_reviewed_bse_universe(
-        universe, instruments, dates, bse_aliases
-    )
+    universe = _supplement_reviewed_bse_universe(universe, instruments, dates, bse_aliases)
     aliases = [*list(symbol_aliases or []), *bse_aliases]
     _validate_symbol_aliases(aliases)
     universe = _apply_symbol_aliases(universe, aliases, "source_universe_symbol")
     bars_clean = _apply_symbol_aliases(_prepare_bars(bars), aliases, "source_bar_symbol")
-    universe = _supplement_reviewed_lifecycle_gaps(
-        universe, bars_clean, instruments
+    bars_clean, pre_bse_listing_bar_rows = _exclude_pre_bse_listing_bars(
+        bars_clean, instruments, bse_aliases
     )
-    limits_clean = _apply_symbol_aliases(
-        _prepare_limits(limits), aliases, "source_limit_symbol"
-    )
+    universe = _supplement_reviewed_lifecycle_gaps(universe, bars_clean, instruments)
+    limits_clean = _apply_symbol_aliases(_prepare_limits(limits), aliases, "source_limit_symbol")
     suspension_flags = _apply_symbol_aliases(
         _prepare_suspensions(suspensions), aliases, "source_suspension_symbol"
     )
@@ -87,14 +84,11 @@ def build_tradability_matrix(
         sample = outside_universe[["symbol", "trade_date"]].head(10).to_dict("records")
         raise TradabilityError(f"Daily bars fall outside the historical universe: {sample}")
 
-    matrix = universe.merge(
-        bars_clean, on=["symbol", "trade_date"], how="left", validate="one_to_one"
-    ).merge(
-        limits_clean, on=["symbol", "trade_date"], how="left", validate="one_to_one"
-    ).merge(
-        suspension_flags, on=["symbol", "trade_date"], how="left", validate="one_to_one"
-    ).merge(
-        status_flags, on=["symbol", "trade_date"], how="left", validate="one_to_one"
+    matrix = (
+        universe.merge(bars_clean, on=["symbol", "trade_date"], how="left", validate="one_to_one")
+        .merge(limits_clean, on=["symbol", "trade_date"], how="left", validate="one_to_one")
+        .merge(suspension_flags, on=["symbol", "trade_date"], how="left", validate="one_to_one")
+        .merge(status_flags, on=["symbol", "trade_date"], how="left", validate="one_to_one")
     )
     boolean_defaults = [
         "has_suspension_event",
@@ -106,8 +100,8 @@ def build_tradability_matrix(
         matrix[column] = matrix[column].eq(True)
     matrix["has_bar"] = matrix["close"].notna()
     matrix["has_limit_record"] = matrix["up_limit"].notna() & matrix["down_limit"].notna()
-    matrix["has_bounded_price_limit"] = (
-        matrix["has_limit_record"] & (matrix["price_limit_regime"] == "bounded")
+    matrix["has_bounded_price_limit"] = matrix["has_limit_record"] & (
+        matrix["price_limit_regime"] == "bounded"
     )
     matrix["unexplained_missing_bar"] = ~matrix["has_bar"] & ~matrix["is_suspended"]
     matrix["bar_without_limit"] = matrix["has_bar"] & ~matrix["has_limit_record"]
@@ -118,9 +112,7 @@ def build_tradability_matrix(
     matrix["price_below_down_limit"] = comparable & (
         matrix["low"] < matrix["down_limit"] - tolerance
     )
-    matrix["price_above_up_limit"] = comparable & (
-        matrix["high"] > matrix["up_limit"] + tolerance
-    )
+    matrix["price_above_up_limit"] = comparable & (matrix["high"] > matrix["up_limit"] + tolerance)
     matrix["pre_close_mismatch"] = (
         comparable
         & matrix["bar_pre_close"].notna()
@@ -134,15 +126,9 @@ def build_tradability_matrix(
         & ~matrix["price_above_up_limit"]
     )
 
-    matrix["open_at_up_limit"] = comparable & (
-        matrix["open"] >= matrix["up_limit"] - tolerance
-    )
-    matrix["open_at_down_limit"] = comparable & (
-        matrix["open"] <= matrix["down_limit"] + tolerance
-    )
-    matrix["one_price_limit_up"] = comparable & (
-        matrix["low"] >= matrix["up_limit"] - tolerance
-    )
+    matrix["open_at_up_limit"] = comparable & (matrix["open"] >= matrix["up_limit"] - tolerance)
+    matrix["open_at_down_limit"] = comparable & (matrix["open"] <= matrix["down_limit"] + tolerance)
+    matrix["one_price_limit_up"] = comparable & (matrix["low"] >= matrix["up_limit"] - tolerance)
     matrix["one_price_limit_down"] = comparable & (
         matrix["high"] <= matrix["down_limit"] + tolerance
     )
@@ -161,10 +147,7 @@ def build_tradability_matrix(
         matrix["has_bar"], "observed_close", "carry_forward_prior_close"
     )
     matrix["standard_research_eligible"] = (
-        matrix["data_complete"]
-        & matrix["has_bar"]
-        & ~matrix["is_suspended"]
-        & ~matrix["is_st"]
+        matrix["data_complete"] & matrix["has_bar"] & ~matrix["is_suspended"] & ~matrix["is_st"]
     )
     matrix["buy_block_reason"] = _block_reason(matrix, "buy")
     matrix["sell_block_reason"] = _block_reason(matrix, "sell")
@@ -177,6 +160,7 @@ def build_tradability_matrix(
     matrix["research_feature_allowed"] = False
     matrix["tradability_version"] = spec.version
     matrix["tradability_spec_sha256"] = spec.fingerprint
+    matrix.attrs["pre_bse_listing_bar_rows_excluded"] = pre_bse_listing_bar_rows
     return matrix.sort_values(["trade_date", "symbol"]).reset_index(drop=True)
 
 
@@ -203,9 +187,7 @@ def tradability_quality_summary(frame: pd.DataFrame) -> Dict[str, Any]:
         "unbounded_price_limit_rows": int(
             (frame["has_limit_record"] & ~frame["has_bounded_price_limit"]).sum()
         ),
-        "partial_or_intraday_suspension_rows": int(
-            frame["partial_or_intraday_suspension"].sum()
-        ),
+        "partial_or_intraday_suspension_rows": int(frame["partial_or_intraday_suspension"].sum()),
         "possible_corporate_action_rows": int(frame["pre_close_mismatch"].sum()),
         "master_record_missing_rows": int((~frame["master_record_present"]).sum()),
         "identity_alias_resolved_rows": int(frame["identity_alias_resolved"].sum()),
@@ -217,6 +199,9 @@ def tradability_quality_summary(frame: pd.DataFrame) -> Dict[str, Any]:
         ),
         "multi_source_symbol_rows": int(
             frame["source_bar_symbol"].fillna("").str.contains(" | ", regex=False).sum()
+        ),
+        "pre_bse_listing_bar_rows_excluded": int(
+            frame.attrs.get("pre_bse_listing_bar_rows_excluded", 0)
         ),
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
@@ -247,9 +232,7 @@ def build_tradability_artifact(
             "stock_status",
         )
     }
-    instruments = load_latest_snapshot(
-        lake_root, "tushare", "instruments", as_of_ingested_at
-    )
+    instruments = load_latest_snapshot(lake_root, "tushare", "instruments", as_of_ingested_at)
     security_code_mappings = load_latest_snapshot(
         lake_root, "tushare", "security_code_mappings", as_of_ingested_at
     )
@@ -261,10 +244,7 @@ def build_tradability_artifact(
     aliases = alias_payload.get("aliases", [])
     implementation = _implementation_identity()
     partition_dates = {
-        dataset: {
-            entry["partition_values"]["trade_date"]
-            for entry in snapshot.manifest_entries
-        }
+        dataset: {entry["partition_values"]["trade_date"] for entry in snapshot.manifest_entries}
         for dataset, snapshot in snapshots.items()
     }
     expected_dates = partition_dates["daily_bars"]
@@ -341,9 +321,7 @@ def build_tradability_artifact(
         "security_identity_policy": {
             "bse_policy_version": "bse_920_transition_v1",
             "new_listing_policy_start": str(_BSE_NEW_CODE_POLICY_START.date()),
-            "six_security_pilot_effective_date": str(
-                _BSE_PILOT_EFFECTIVE_DATE.date()
-            ),
+            "six_security_pilot_effective_date": str(_BSE_PILOT_EFFECTIVE_DATE.date()),
             "remaining_legacy_effective_date": str(_BSE_FULL_EFFECTIVE_DATE.date()),
             "pilot_names": sorted(_BSE_PILOT_NAMES),
             "mapping_rows": len(security_code_mappings.frame),
@@ -390,9 +368,7 @@ def _historical_universe(
                 f"Historical instrument snapshots missing columns: {missing_history}"
             )
         history["trade_date"] = pd.to_datetime(history["trade_date"]).dt.normalize()
-        history["list_date"] = pd.to_datetime(
-            history["list_date"], errors="coerce"
-        ).dt.normalize()
+        history["list_date"] = pd.to_datetime(history["list_date"], errors="coerce").dt.normalize()
         history = history.loc[
             history["trade_date"].isin(dates)
             & history["symbol"].astype(str).str.fullmatch(r"\d{6}\.(SH|SZ|BJ)")
@@ -455,12 +431,12 @@ def _supplement_reviewed_bse_universe(
     dates: pd.DatetimeIndex,
     bse_aliases: Sequence[Dict[str, Any]],
 ) -> pd.DataFrame:
-    """Fill vendor ``bak_basic`` BSE gaps only through the reviewed crosswalk.
+    """Fill vendor ``bak_basic`` BSE gaps from the all-status security master.
 
     Tushare's historical ``bak_basic`` snapshots omit BSE securities on some
-    older dates while the daily endpoint retains their bars under rewritten
-    920 codes.  The current master is therefore allowed only for securities
-    present in the frozen BSE mapping, bounded by their listing/delisting dates.
+    dates while the daily endpoint retains their bars. The authoritative
+    all-status master is bounded by BSE listing/delisting dates; the frozen
+    crosswalk additionally restores securities whose display code changed.
     """
     if not bse_aliases:
         return universe
@@ -468,33 +444,31 @@ def _supplement_reviewed_bse_universe(
     missing = sorted(required - set(instruments.columns))
     if missing:
         raise TradabilityError(f"Instrument master missing BSE supplement columns: {missing}")
-    alias_by_current = {
-        str(alias["current_symbol"]): alias for alias in bse_aliases
-    }
+    alias_by_current = {str(alias["current_symbol"]): alias for alias in bse_aliases}
     master = instruments.copy()
-    master = master.loc[master["symbol"].astype(str).isin(alias_by_current)].copy()
+    master = master.loc[
+        master["exchange"].astype(str).eq("BSE") | master["symbol"].astype(str).str.endswith(".BJ")
+    ].copy()
     if "list_status" in master:
         master = master.loc[master["list_status"] != "G"]
     master["list_date"] = pd.to_datetime(master["list_date"], errors="coerce").dt.normalize()
-    master["delist_date"] = pd.to_datetime(
-        master["delist_date"], errors="coerce"
-    ).dt.normalize()
+    master["delist_date"] = pd.to_datetime(master["delist_date"], errors="coerce").dt.normalize()
     if master["list_date"].isna().any():
         raise TradabilityError("reviewed BSE master rows require list_date")
-    master = master.sort_values(["symbol", "list_date"]).drop_duplicates(
-        "symbol", keep="last"
-    )
+    master = master.sort_values(["symbol", "list_date"]).drop_duplicates("symbol", keep="last")
     existing = set(zip(universe["symbol"].astype(str), universe["trade_date"]))
     additions = []
     for row in master.to_dict("records"):
-        alias = alias_by_current[str(row["symbol"])]
+        alias = alias_by_current.get(str(row["symbol"]))
         for trade_date in dates:
             if trade_date < row["list_date"] or (
                 pd.notna(row["delist_date"]) and trade_date > row["delist_date"]
             ):
                 continue
             current_key = (str(row["symbol"]), trade_date)
-            historical_key = (str(alias["historical_symbol"]), trade_date)
+            historical_key = (
+                (str(alias["historical_symbol"]), trade_date) if alias is not None else current_key
+            )
             if current_key in existing or historical_key in existing:
                 continue
             additions.append(
@@ -520,7 +494,12 @@ def _supplement_reviewed_lifecycle_gaps(
     bars: pd.DataFrame,
     instruments: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Repair only IPO-day and final-delisting-window ``bak_basic`` omissions."""
+    """Repair ``bak_basic`` omissions only when a bar proves actual trading.
+
+    The all-status master must independently confirm that the bar falls inside
+    the security's listing/delisting interval. Code changes are applied before
+    this check, so a vendor-rewritten symbol cannot bypass the lifecycle gate.
+    """
     outside = bars[["symbol", "trade_date"]].merge(
         universe[["symbol", "trade_date"]],
         on=["symbol", "trade_date"],
@@ -533,31 +512,22 @@ def _supplement_reviewed_lifecycle_gaps(
     required = {"symbol", "name", "exchange", "list_date", "delist_date"}
     missing = sorted(required - set(instruments.columns))
     if missing:
-        raise TradabilityError(
-            f"Instrument master missing lifecycle supplement columns: {missing}"
-        )
+        raise TradabilityError(f"Instrument master missing lifecycle supplement columns: {missing}")
     master = instruments.copy()
     master["list_date"] = pd.to_datetime(master["list_date"], errors="coerce").dt.normalize()
-    master["delist_date"] = pd.to_datetime(
-        master["delist_date"], errors="coerce"
-    ).dt.normalize()
-    master = master.sort_values(["symbol", "list_date"]).drop_duplicates(
-        "symbol", keep="last"
-    )
+    master["delist_date"] = pd.to_datetime(master["delist_date"], errors="coerce").dt.normalize()
+    master = master.sort_values(["symbol", "list_date"]).drop_duplicates("symbol", keep="last")
     candidates = outside.merge(
         master[["symbol", "name", "exchange", "list_date", "delist_date"]],
         on="symbol",
         how="left",
         validate="many_to_one",
     )
-    days_to_delist = (candidates["delist_date"] - candidates["trade_date"]).dt.days
-    candidates["lifecycle_reason"] = np.select(
-        [
-            candidates["trade_date"] == candidates["list_date"],
-            days_to_delist.between(0, 31, inclusive="both"),
-        ],
-        ["ipo_listing_day", "final_delisting_window_31_calendar_days"],
-        default="",
+    within_lifecycle = (candidates["trade_date"] >= candidates["list_date"]) & (
+        candidates["delist_date"].isna() | (candidates["trade_date"] <= candidates["delist_date"])
+    )
+    candidates["lifecycle_reason"] = np.where(
+        within_lifecycle, "current_master_lifecycle_validated_observed_bar", ""
     )
     invalid = candidates.loc[
         candidates["lifecycle_reason"].eq("")
@@ -590,6 +560,53 @@ def _supplement_reviewed_lifecycle_gaps(
         ]
     ]
     return pd.concat([universe, additions], ignore_index=True)
+
+
+def _exclude_pre_bse_listing_bars(
+    bars: pd.DataFrame,
+    instruments: pd.DataFrame,
+    bse_aliases: Sequence[Dict[str, Any]],
+) -> tuple[pd.DataFrame, int]:
+    """Exclude vendor NEEQ history that predates the security's BSE listing.
+
+    Tushare's daily endpoint can expose pre-BSE NEEQ bars under the later BSE
+    symbol namespace.  Those observations are not A-share trading history and
+    must not expand the P0.5 research universe backwards in time.
+    """
+    if not bse_aliases or bars.empty:
+        return bars, 0
+    required = {"symbol", "exchange", "list_date"}
+    missing = sorted(required - set(instruments.columns))
+    if missing:
+        raise TradabilityError(f"Instrument master missing BSE listing columns: {missing}")
+    listing_dates = (
+        instruments[["symbol", "list_date"]]
+        .assign(list_date=lambda frame: pd.to_datetime(frame["list_date"], errors="coerce"))
+        .dropna(subset=["list_date"])
+        .sort_values(["symbol", "list_date"])
+        .drop_duplicates("symbol", keep="last")
+        .set_index("symbol")["list_date"]
+        .to_dict()
+    )
+    bse_master = instruments.loc[
+        instruments["exchange"].astype(str).eq("BSE")
+        | instruments["symbol"].astype(str).str.endswith(".BJ")
+    ].copy()
+    valid_from: Dict[str, pd.Timestamp] = {
+        str(row["symbol"]): pd.Timestamp(row["list_date"]).normalize()
+        for row in bse_master.to_dict("records")
+        if pd.notna(row["list_date"])
+    }
+    for alias in bse_aliases:
+        current = str(alias["current_symbol"])
+        listed = listing_dates.get(current)
+        if listed is None:
+            raise TradabilityError(f"reviewed BSE mapping lacks master listing date: {current}")
+        valid_from[str(alias["historical_symbol"])] = pd.Timestamp(listed).normalize()
+        valid_from[current] = pd.Timestamp(listed).normalize()
+    minimum_dates = bars["symbol"].map(valid_from)
+    excluded = minimum_dates.notna() & (bars["trade_date"] < minimum_dates)
+    return bars.loc[~excluded].copy(), int(excluded.sum())
 
 
 def _prepare_bars(frame: pd.DataFrame) -> pd.DataFrame:
@@ -699,10 +716,7 @@ def _apply_symbol_aliases(
     result[source_column] = result["symbol"]
     for alias in aliases:
         effective = pd.Timestamp(alias["effective_date"]).normalize()
-        mask = (
-            (result["symbol"] == alias["current_symbol"])
-            & (result["trade_date"] < effective)
-        )
+        mask = (result["symbol"] == alias["current_symbol"]) & (result["trade_date"] < effective)
         result.loc[mask, "symbol"] = alias["historical_symbol"]
     keys = ["symbol", "trade_date"]
     if not result.duplicated(keys).any():
@@ -713,16 +727,23 @@ def _apply_symbol_aliases(
         if len(group) == 1:
             collapsed.append(group.iloc[0])
             continue
-        if len(group[compare_columns].drop_duplicates()) != 1:
+        conflicting_columns = [
+            column for column in compare_columns if group[column].dropna().nunique() > 1
+        ]
+        if conflicting_columns:
             sources = sorted(group[source_column].astype(str).unique())
             raise TradabilityError(
-                f"Aliased source records disagree for {sources} on "
-                f"{group.iloc[0]['trade_date']}"
+                f"Aliased source records disagree in {conflicting_columns} for "
+                f"{sources} on {group.iloc[0]['trade_date']}"
             )
         preferred = group.assign(
             _historical_code=(group[source_column] == group["symbol"]).astype(int)
         ).sort_values("_historical_code", ascending=False)
         row = preferred.iloc[0].drop(labels="_historical_code").copy()
+        for column in compare_columns:
+            non_null = group[column].dropna()
+            if pd.isna(row[column]) and not non_null.empty:
+                row[column] = non_null.iloc[0]
         row[source_column] = " | ".join(sorted(group[source_column].astype(str).unique()))
         collapsed.append(row)
     return pd.DataFrame(collapsed).reset_index(drop=True)
@@ -755,18 +776,19 @@ def _bse_symbol_aliases(
     for row in mappings[list(required)].to_dict("records"):
         list_date = pd.Timestamp(row["list_date"]).normalize()
         if pd.isna(list_date):
-            raise TradabilityError(
-                f"BSE code mapping lacks list_date: {row['historical_symbol']}"
-            )
+            raise TradabilityError(f"BSE code mapping lacks list_date: {row['historical_symbol']}")
         if list_date >= _BSE_NEW_CODE_POLICY_START:
             effective_date = list_date
             policy = "new_listing_920_from_list_date"
+            evidence = "https://www.bse.cn/jygl_list/200021626.html"
         elif str(row["name"]).strip() in _BSE_PILOT_NAMES:
             effective_date = _BSE_PILOT_EFFECTIVE_DATE
             policy = "six_security_pilot_20250506"
+            evidence = "https://www.bse.cn/important_news/200025603.html"
         else:
             effective_date = _BSE_FULL_EFFECTIVE_DATE
             policy = "remaining_legacy_securities_20251009"
+            evidence = "https://www.bse.cn/important_news/200026735.html"
         current_symbol = str(row["current_symbol"])
         result.append(
             {
@@ -774,6 +796,11 @@ def _bse_symbol_aliases(
                 "historical_symbol": str(row["historical_symbol"]),
                 "effective_date": str(effective_date.date()),
                 "stable_instrument_id": f"CN_EQ:BSE:{current_symbol}",
+                "legal_continuity": True,
+                "business_continuity": True,
+                "price_chain_policy": "continuous",
+                "fundamental_chain_policy": "continuous",
+                "evidence": evidence,
                 "policy": policy,
                 "policy_version": "bse_920_transition_v1",
             }
@@ -787,6 +814,11 @@ def _validate_symbol_aliases(aliases: Sequence[Dict[str, Any]]) -> None:
         "historical_symbol",
         "effective_date",
         "stable_instrument_id",
+        "legal_continuity",
+        "business_continuity",
+        "price_chain_policy",
+        "fundamental_chain_policy",
+        "evidence",
     }
     seen_current: Dict[str, Dict[str, Any]] = {}
     seen_stable: Dict[str, Dict[str, Any]] = {}
@@ -796,6 +828,23 @@ def _validate_symbol_aliases(aliases: Sequence[Dict[str, Any]]) -> None:
             raise TradabilityError(f"Symbol alias missing fields: {missing}")
         current = str(alias["current_symbol"])
         stable = str(alias["stable_instrument_id"])
+        if alias["legal_continuity"] is not True:
+            raise TradabilityError(f"Symbol alias must prove legal continuity: {current}")
+        if not isinstance(alias["business_continuity"], bool):
+            raise TradabilityError(f"Symbol alias has invalid business continuity: {current}")
+        if alias["price_chain_policy"] != "continuous":
+            raise TradabilityError(
+                f"Legally continuous alias must preserve its price chain: {current}"
+            )
+        expected_fundamental_policy = (
+            "continuous" if alias["business_continuity"] is True else "reset_at_effective_date"
+        )
+        if alias["fundamental_chain_policy"] != expected_fundamental_policy:
+            raise TradabilityError(
+                f"Fundamental chain policy conflicts with business continuity for {current}"
+            )
+        if not str(alias["evidence"]).startswith("https://"):
+            raise TradabilityError(f"Symbol alias evidence must use HTTPS: {current}")
         if current in seen_current and seen_current[current] != alias:
             raise TradabilityError(f"Conflicting aliases for current symbol {current}")
         if stable in seen_stable and seen_stable[stable] != alias:
@@ -814,19 +863,15 @@ def _attach_instrument_ids(
     result["identity_alias_policy_version"] = ""
     for alias in aliases:
         effective = pd.Timestamp(alias["effective_date"]).normalize()
-        historical = (
-            (result["symbol"] == alias["historical_symbol"])
-            & (result["trade_date"] < effective)
+        historical = (result["symbol"] == alias["historical_symbol"]) & (
+            result["trade_date"] < effective
         )
-        current = (
-            (result["symbol"] == alias["current_symbol"])
-            & (result["trade_date"] >= effective)
+        current = (result["symbol"] == alias["current_symbol"]) & (
+            result["trade_date"] >= effective
         )
         applies = historical | current
         result.loc[applies, "instrument_id"] = alias["stable_instrument_id"]
-        result.loc[applies, "identity_alias_policy"] = alias.get(
-            "policy", "reviewed_manual_alias"
-        )
+        result.loc[applies, "identity_alias_policy"] = alias.get("policy", "reviewed_manual_alias")
         result.loc[applies, "identity_alias_policy_version"] = alias.get(
             "policy_version", "instrument_alias_config"
         )

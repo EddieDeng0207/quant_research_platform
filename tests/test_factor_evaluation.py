@@ -44,7 +44,8 @@ def _factor_inputs(periods: int = 30, securities: int = 30):
                     "research_eligible": True,
                     "announcement_at": decision - pd.Timedelta(days=4),
                     "available_at": decision - pd.Timedelta(days=3),
-                    "ingested_at": decision - pd.Timedelta(days=2),
+                    "ingested_at": decision + pd.Timedelta(days=30),
+                    "research_as_of_at": pd.Timestamp("2026-08-15", tz="UTC"),
                     "decision_at": decision,
                     "execution_at": execution,
                 }
@@ -331,7 +332,7 @@ def test_factor_artifact_is_deterministic_and_report_verifies_hashes(tmp_path: P
     )
     assert first == second
     manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "p07_single_factor_evaluation_v3"
+    assert manifest["schema_version"] == "p07_single_factor_evaluation_v4"
     assert manifest["quality"]["promotion_passed"]
     assert "label_coverage" in manifest["outputs"]
     report = generate_factor_evaluation_report(first, tmp_path / "report.md")

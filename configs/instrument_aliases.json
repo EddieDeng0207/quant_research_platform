@@ -1,12 +1,56 @@
 {
-  "version": 1,
+  "version": 3,
   "aliases": [
+    {
+      "provider": "tushare",
+      "current_symbol": "001872.SZ",
+      "historical_symbol": "000022.SZ",
+      "effective_date": "2018-12-26",
+      "stable_instrument_id": "CN_EQ:CM_PORT_GROUP_19930505",
+      "legal_continuity": true,
+      "business_continuity": false,
+      "price_chain_policy": "continuous",
+      "fundamental_chain_policy": "reset_at_effective_date",
+      "reason": "Exchange-approved security-code change; legal listed entity and rights continued",
+      "evidence": "https://static.cninfo.com.cn/finalpage/2018-12-21/1205681867.PDF"
+    },
+    {
+      "provider": "tushare",
+      "current_symbol": "001914.SZ",
+      "historical_symbol": "000043.SZ",
+      "effective_date": "2019-12-16",
+      "stable_instrument_id": "CN_EQ:CMPO_19940928",
+      "legal_continuity": true,
+      "business_continuity": false,
+      "price_chain_policy": "continuous",
+      "fundamental_chain_policy": "reset_at_effective_date",
+      "reason": "Exchange-approved security-code change; shareholder rights and holding periods continued",
+      "evidence": "https://static.cninfo.com.cn/finalpage/2019-12-16/1207164397.PDF"
+    },
+    {
+      "provider": "tushare",
+      "current_symbol": "601360.SH",
+      "historical_symbol": "601313.SH",
+      "effective_date": "2018-02-28",
+      "stable_instrument_id": "CN_EQ:360_SECURITY_20120116",
+      "legal_continuity": true,
+      "business_continuity": false,
+      "price_chain_policy": "continuous",
+      "fundamental_chain_policy": "reset_at_effective_date",
+      "reason": "Exchange-approved security-code change from Jiangnan Jiajie to 360 Security",
+      "evidence": "https://static.cninfo.com.cn/finalpage/2018-02-02/1204386750.PDF",
+      "business_continuity_evidence": "https://static.cninfo.com.cn/finalpage/2018-02-28/1204434951.PDF"
+    },
     {
       "provider": "tushare",
       "current_symbol": "302132.SZ",
       "historical_symbol": "300114.SZ",
       "effective_date": "2025-02-17",
       "stable_instrument_id": "CN_EQ:AVIC_CAC_20100827",
+      "legal_continuity": true,
+      "business_continuity": false,
+      "price_chain_policy": "continuous",
+      "fundamental_chain_policy": "reset_at_effective_date",
       "reason": "Exchange-approved security-code change; legal listed entity continued",
       "evidence": "https://static.cninfo.com.cn/finalpage/2025-02-15/1222544408.PDF"
     }

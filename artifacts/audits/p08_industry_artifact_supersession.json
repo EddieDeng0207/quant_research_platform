@@ -1,0 +1,38 @@
+{
+  "recorded_on": "2026-08-16",
+  "reason": "instrument_id_namespace_mismatch",
+  "old_artifact": {
+    "artifact_id": "43e6a195e46f7eb1aa6c",
+    "schema_version": "p08_historical_industry_v1",
+    "git_commit": "8e6addbe50b4e80dc2c6d795051b821e4a28718c",
+    "status": "invalid_for_research_do_not_use",
+    "instrument_id_contract": "raw_symbol_without_CN_EQ_namespace",
+    "fundamental_join_intersection": 0,
+    "retention_policy": "retained_immutably_for_audit_only"
+  },
+  "replacement_artifact": {
+    "artifact_id": "5e5a922760de641e4f50",
+    "schema_version": "p08_historical_industry_v2",
+    "git_commit": "3b22182785c37a8be89875d14ef69e518727bd89",
+    "status": "promoted",
+    "instrument_id_contract": "shared_CN_EQ_namespace_with_reviewed_and_BSE_aliases",
+    "rows": 10686,
+    "industry_instruments": 5446,
+    "fundamental_join_intersection": 5446,
+    "fundamental_only_instruments": 1276,
+    "industry_only_instruments": 0,
+    "invalid_instrument_namespace_rows": 0,
+    "overlapping_intervals": 0
+  },
+  "alias_inputs": {
+    "reviewed_aliases_sha256": "17c3eaa99a61fa5119030b736dfe1ede55886bd2d97552e0291d22849a79465a",
+    "security_code_mappings_sha256": "8bd5f64f1e9114413abaf871994daa0ba755b225df3763e64da354022d3d6134"
+  },
+  "coverage_audit": {
+    "artifact_id": "980568fcb9a32c9f8ef2",
+    "scope": "conservative_PIT_identity_diagnostic_not_formal_P0.7_factor_panel_coverage",
+    "static_fundamental_to_industry_coverage": 0.8101755429931567,
+    "daily_industry_to_fundamental_coverage_minimum": 1.0,
+    "formal_P0.7_coverage": "must_be_recomputed_from_each_dated_eligible_factor_panel"
+  }
+}
