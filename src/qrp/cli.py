@@ -35,6 +35,8 @@ from .data.ingestion import (
 )
 from .data.providers.base import FetchResult, ProviderError
 from .data.readiness import (
+    DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS,
+    DEFAULT_MAXIMUM_REPORT_PERIOD_STALENESS_DAYS,
     audit_research_readiness,
     write_research_readiness_report,
 )
@@ -311,6 +313,16 @@ def _build_parser() -> argparse.ArgumentParser:
     readiness.add_argument("--minimum-weekly-periods", type=int, default=104)
     readiness.add_argument("--minimum-fundamental-symbols", type=int, default=200)
     readiness.add_argument("--minimum-industry-instruments", type=int, default=200)
+    readiness.add_argument(
+        "--maximum-report-period-staleness-days",
+        type=int,
+        default=DEFAULT_MAXIMUM_REPORT_PERIOD_STALENESS_DAYS,
+    )
+    readiness.add_argument(
+        "--maximum-availability-staleness-days",
+        type=int,
+        default=DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS,
+    )
     readiness.add_argument("--data-root", default="data/lake")
     readiness.add_argument(
         "--output", default="artifacts/audits/latest_research_readiness.json"
@@ -847,6 +859,12 @@ def main(argv: List[str] = None) -> int:
                 minimum_weekly_periods=args.minimum_weekly_periods,
                 minimum_fundamental_symbols=args.minimum_fundamental_symbols,
                 minimum_industry_instruments=args.minimum_industry_instruments,
+                maximum_report_period_staleness_days=(
+                    args.maximum_report_period_staleness_days
+                ),
+                maximum_availability_staleness_days=(
+                    args.maximum_availability_staleness_days
+                ),
             )
             output = write_research_readiness_report(report, Path(args.output))
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))

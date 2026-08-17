@@ -21,6 +21,8 @@ DEFAULT_REQUIRED_DAILY_DATASETS = (
     "daily_suspensions",
     "stock_status",
 )
+DEFAULT_MAXIMUM_REPORT_PERIOD_STALENESS_DAYS = 220
+DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS = 190
 
 
 @dataclass
@@ -57,6 +59,12 @@ def audit_research_readiness(
     minimum_weekly_periods: int = 104,
     minimum_fundamental_symbols: int = 200,
     minimum_industry_instruments: int = 200,
+    maximum_report_period_staleness_days: int = (
+        DEFAULT_MAXIMUM_REPORT_PERIOD_STALENESS_DAYS
+    ),
+    maximum_availability_staleness_days: int = (
+        DEFAULT_MAXIMUM_AVAILABILITY_STALENESS_DAYS
+    ),
 ) -> ResearchReadinessReport:
     """Prove complete daily partitions and required PIT research inputs."""
     start = pd.Timestamp(start_date).normalize()
@@ -67,6 +75,8 @@ def audit_research_readiness(
         minimum_weekly_periods,
         minimum_fundamental_symbols,
         minimum_industry_instruments,
+        maximum_report_period_staleness_days,
+        maximum_availability_staleness_days,
     ) < 1:
         raise ValueError("readiness minimums must be positive")
     calendar_file = Path(calendar_path)
@@ -128,7 +138,12 @@ def audit_research_readiness(
         }
 
     report.fundamentals = _audit_fundamental_artifact(
-        fundamental_artifact, minimum_fundamental_symbols
+        fundamental_artifact,
+        start,
+        end,
+        minimum_fundamental_symbols,
+        maximum_report_period_staleness_days,
+        maximum_availability_staleness_days,
     )
     report.industry_membership = _audit_industry_membership(
         industry_membership_path, start, end, minimum_industry_instruments
@@ -161,7 +176,12 @@ def write_research_readiness_report(
 
 
 def _audit_fundamental_artifact(
-    path: Optional[Path], minimum_symbols: int
+    path: Optional[Path],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    minimum_symbols: int,
+    maximum_report_period_staleness_days: int,
+    maximum_availability_staleness_days: int,
 ) -> Dict[str, Any]:
     if path is None:
         return {"ready": False, "reason": "not_provided"}
@@ -171,29 +191,100 @@ def _audit_fundamental_artifact(
         return {"ready": False, "reason": "missing_manifest", "path": str(root)}
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     output_failures = []
+    output_row_count_failures = []
     for name, metadata in manifest.get("outputs", {}).items():
         output = root / metadata["path"]
         if not output.exists() or _sha256(output) != metadata["sha256"]:
             output_failures.append(name)
+            continue
+        expected_rows = metadata.get("rows")
+        if expected_rows is not None and _parquet_rows(output) != int(expected_rows):
+            output_row_count_failures.append(name)
     promoted = bool(manifest.get("quality", {}).get("promotion_passed", False))
     symbols = int(manifest.get("quality", {}).get("symbols", 0))
-    statements = set(manifest.get("quality", {}).get("statements", {}))
-    missing_statements = sorted(set(FUNDAMENTAL_STATEMENTS) - statements)
+    statement_quality = manifest.get("quality", {}).get("statements", {})
+    outputs = manifest.get("outputs", {})
+    missing_statements = []
+    empty_statements = []
+    statement_row_count_mismatches = []
+    statement_coverage: Dict[str, Any] = {}
+    for statement in FUNDAMENTAL_STATEMENTS:
+        quality = statement_quality.get(statement)
+        output = outputs.get(statement)
+        if quality is None or output is None:
+            missing_statements.append(statement)
+            continue
+        quality_rows = int(quality.get("rows", 0))
+        output_rows = int(output.get("rows", 0))
+        if min(quality_rows, output_rows) <= 0:
+            empty_statements.append(statement)
+        if quality_rows != output_rows:
+            statement_row_count_mismatches.append(statement)
+        report_start = _normalized_date(quality.get("report_period_start"))
+        report_end = _normalized_date(quality.get("report_period_end"))
+        available_start = _normalized_date(quality.get("available_at_start"))
+        available_end = _normalized_date(quality.get("available_at_end"))
+        report_end_lag = _date_lag_days(end, report_end)
+        available_end_lag = _date_lag_days(end, available_end)
+        covers_start = bool(
+            report_start is not None
+            and available_start is not None
+            and report_start <= start
+            and available_start <= start
+        )
+        covers_end = bool(
+            report_end_lag is not None
+            and available_end_lag is not None
+            and report_end_lag <= maximum_report_period_staleness_days
+            and available_end_lag <= maximum_availability_staleness_days
+        )
+        statement_coverage[statement] = {
+            "rows": quality_rows,
+            "report_period_start": _date_string(report_start),
+            "report_period_end": _date_string(report_end),
+            "available_at_start": _date_string(available_start),
+            "available_at_end": _date_string(available_end),
+            "report_period_end_lag_days": report_end_lag,
+            "available_at_end_lag_days": available_end_lag,
+            "covers_start": covers_start,
+            "covers_end": covers_end,
+            "covers_requested_interval": covers_start and covers_end,
+        }
+    statements_outside_requested_interval = sorted(
+        statement
+        for statement, coverage in statement_coverage.items()
+        if not coverage["covers_requested_interval"]
+    )
     return {
         "ready": (
             promoted
             and not output_failures
+            and not output_row_count_failures
             and symbols >= minimum_symbols
             and not missing_statements
+            and not empty_statements
+            and not statement_row_count_mismatches
+            and not statements_outside_requested_interval
         ),
         "artifact_id": manifest.get("artifact_id"),
         "schema_version": manifest.get("schema_version"),
         "research_as_of_at": manifest.get("identity", {}).get("research_as_of_at"),
         "output_hash_failures": output_failures,
+        "output_row_count_failures": output_row_count_failures,
         "promotion_passed": promoted,
         "symbols": symbols,
         "minimum_symbols": minimum_symbols,
         "missing_statements": missing_statements,
+        "empty_statements": empty_statements,
+        "statement_row_count_mismatches": statement_row_count_mismatches,
+        "maximum_report_period_staleness_days": (
+            maximum_report_period_staleness_days
+        ),
+        "maximum_availability_staleness_days": (
+            maximum_availability_staleness_days
+        ),
+        "statements_outside_requested_interval": statements_outside_requested_interval,
+        "statement_coverage": statement_coverage,
     }
 
 
@@ -299,3 +390,30 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _parquet_rows(path: Path) -> int:
+    import pyarrow.parquet as parquet
+
+    return int(parquet.ParquetFile(path).metadata.num_rows)
+
+
+def _normalized_date(value: Any) -> Optional[pd.Timestamp]:
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        return None
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert("Asia/Shanghai").tz_localize(None)
+    return timestamp.normalize()
+
+
+def _date_lag_days(
+    requested_end: pd.Timestamp, covered_end: Optional[pd.Timestamp]
+) -> Optional[int]:
+    return None if covered_end is None else int((requested_end - covered_end).days)
+
+
+def _date_string(value: Optional[pd.Timestamp]) -> Optional[str]:
+    return None if value is None else str(value.date())
