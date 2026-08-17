@@ -20,7 +20,7 @@ from .providers.base import FetchResult, ProviderError
 from .storage import ParquetLake
 
 INDUSTRY_TAXONOMIES = ("SW2014", "SW2021")
-INDUSTRY_INGESTION_POLICY_VERSION = "p08_shenwan_l1_history_v1_rpm250"
+INDUSTRY_INGESTION_POLICY_VERSION = "p08_shenwan_l1_history_v2_rpm400"
 
 
 @dataclass(frozen=True)

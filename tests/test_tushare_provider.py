@@ -336,6 +336,20 @@ class TushareProviderTests(unittest.TestCase):
         )
         self.assertTrue(pd.isna(result.frame.iloc[0]["pre_close"]))
 
+    def test_daily_limit_normalizes_vendor_zero_pre_close_sentinel(self):
+        class ZeroPreCloseClient(FakeTushareClient):
+            @staticmethod
+            def stk_limit(**kwargs):
+                frame = FakeTushareClient.stk_limit(**kwargs)
+                frame["pre_close"] = 0.0
+                return frame
+
+        result = TushareProvider(client=ZeroPreCloseClient()).fetch_daily_limits_by_date(
+            "2016-01-04"
+        )
+        self.assertTrue(pd.isna(result.frame.iloc[0]["pre_close"]))
+        self.assertEqual(result.metadata["zero_pre_close_normalized_to_null_rows"], 1)
+
     def test_daily_limit_preserves_explicit_no_limit_sentinel(self):
         class NoLimitClient(FakeTushareClient):
             @staticmethod
@@ -368,6 +382,39 @@ class TushareProviderTests(unittest.TestCase):
         result = self.provider.fetch_historical_instruments_by_date("2024-01-02")
         self.assertEqual(result.frame.iloc[0]["symbol"], "000001.SZ")
         self.assertEqual(result.partition_values, {"trade_date": "2024-01-02"})
+
+    def test_empty_historical_snapshot_uses_all_status_master_intervals(self):
+        class EmptyHistoricalClient(FakeTushareClient):
+            @staticmethod
+            def bak_basic(**kwargs):
+                return pd.DataFrame()
+
+            @staticmethod
+            def stock_basic(**kwargs):
+                return pd.DataFrame(
+                    {
+                        "ts_code": ["000001.SZ", "000002.SZ", "000003.SZ"],
+                        "symbol": ["000001", "000002", "000003"],
+                        "name": ["存续", "已退市", "未上市"],
+                        "area": ["深圳", "深圳", "深圳"],
+                        "industry": ["银行", "地产", "制造"],
+                        "market": ["主板", "主板", "主板"],
+                        "exchange": ["SZSE", "SZSE", "SZSE"],
+                        "list_status": [kwargs["list_status"]] * 3,
+                        "list_date": ["19910403", "19920101", "20250101"],
+                        "delist_date": [None, "20230101", None],
+                    }
+                )
+
+        provider = TushareProvider(client=EmptyHistoricalClient())
+        provider.fetch_instruments(statuses=("L",))
+        result = provider.fetch_historical_instruments_by_date("2024-01-02")
+        self.assertEqual(result.frame["symbol"].tolist(), ["000001.SZ"])
+        self.assertTrue(result.metadata["bak_basic_empty_fallback_used"])
+        self.assertEqual(
+            result.frame.iloc[0]["universe_snapshot_method"],
+            "all_status_security_master_effective_interval",
+        )
 
     def test_bse_mapping_preserves_both_codes_and_listing_date(self):
         result = self.provider.fetch_security_code_mappings()

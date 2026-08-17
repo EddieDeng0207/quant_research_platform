@@ -31,7 +31,7 @@ FUNDAMENTAL_STATEMENTS = (
     "financial_indicators",
 )
 FUNDAMENTAL_INGESTION_POLICY_VERSION = (
-    "p08_tushare_per_symbol_statement_v1_rpm250"
+    "p08_tushare_per_symbol_statement_v2_rpm400"
 )
 
 

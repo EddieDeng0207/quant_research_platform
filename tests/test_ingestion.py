@@ -134,17 +134,18 @@ def _daily_bars_result(trade_date):
 
 
 class IngestionTests(unittest.TestCase):
-    def test_default_capacity_is_250_requests_per_minute(self):
+    def test_default_capacity_is_400_requests_per_minute(self):
         config = P0BackfillConfig(start_date="2024-01-02", end_date="2024-01-02")
         limiter = RateLimiter(DEFAULT_REQUESTS_PER_MINUTE)
-        self.assertEqual(config.requests_per_minute, 250)
+        self.assertEqual(config.requests_per_minute, 400)
         self.assertEqual(
-            config.ingestion_policy_version, "p0_tushare_max_page_v2_rpm250"
+            config.ingestion_policy_version,
+            "p0_tushare_max_page_v3_rpm400_vendor_sentinels_master_interval_fallback",
         )
         self.assertEqual(
             config.ingestion_policy_version, INGESTION_POLICY_VERSION
         )
-        self.assertAlmostEqual(limiter.minimum_interval, 0.24)
+        self.assertAlmostEqual(limiter.minimum_interval, 0.15)
 
     def test_runner_checkpoints_and_skips_completed_tasks(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -19,7 +19,7 @@
 
 ```bash
 .venv/bin/qrp-data backfill-industry \
-  --requests-per-minute 250 \
+  --requests-per-minute 400 \
   --job-name p08_industry_membership_2016_20260814
 ```
 
@@ -52,4 +52,4 @@ SHA-256 写入 lake manifest。
 ## 并发与限流
 
 市场数据和财务数据允许多个网络线程隐藏响应延迟，但线程共享同一个线程安全限流器。
-在250次/分钟配置下，请求启动时间至少间隔0.24秒；线程数不会放大总调用额度。
+在400次/分钟配置下，请求启动时间至少间隔0.15秒；线程数不会放大总调用额度。

@@ -23,8 +23,10 @@ import pandas as pd
 from .providers.base import FetchResult, ProviderError
 from .storage import ParquetLake
 
-DEFAULT_REQUESTS_PER_MINUTE = 250
-INGESTION_POLICY_VERSION = "p0_tushare_max_page_v2_rpm250"
+DEFAULT_REQUESTS_PER_MINUTE = 400
+INGESTION_POLICY_VERSION = (
+    "p0_tushare_max_page_v3_rpm400_vendor_sentinels_master_interval_fallback"
+)
 
 P0_DATASET_METHODS: Mapping[str, str] = {
     "daily_bars": "fetch_daily_bars_by_date",

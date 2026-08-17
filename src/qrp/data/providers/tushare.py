@@ -65,6 +65,7 @@ class TushareProvider:
 
     def __init__(self, token: Optional[str] = None, client: Optional[Any] = None) -> None:
         self._before_request: Optional[Callable[[], None]] = None
+        self._instrument_master_cache: Optional[pd.DataFrame] = None
         if client is not None:
             self._pro = client
             return
@@ -160,7 +161,7 @@ class TushareProvider:
         frame["delist_date"] = _parse_yyyymmdd(frame["delist_date"])
         frame["source"] = self.name
         frame["ingested_at"] = _utc_now()
-        return FetchResult(
+        result = FetchResult(
             dataset="instruments",
             provider=self.name,
             frame=frame,
@@ -176,6 +177,8 @@ class TushareProvider:
                 "pagination": pagination_by_status,
             },
         ).validate()
+        self._instrument_master_cache = result.frame.copy()
+        return result
 
     def fetch_calendar(
         self, start_date: str, end_date: str, exchange: str = "SSE"
@@ -733,6 +736,8 @@ class TushareProvider:
         frame["trade_date"] = _parse_yyyymmdd(frame["trade_date"])
         for column in ["pre_close", "up_limit", "down_limit"]:
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        zero_pre_close = frame["pre_close"].eq(0)
+        frame.loc[zero_pre_close, "pre_close"] = pd.NA
         frame["price_limit_regime"] = "bounded"
         no_limit_sentinel = (frame["up_limit"] >= 99999.0) & (frame["down_limit"] == 0)
         frame.loc[no_limit_sentinel, "price_limit_regime"] = "none_vendor_sentinel"
@@ -751,6 +756,7 @@ class TushareProvider:
             metadata={
                 "snapshot_semantics": "pre-open daily price limits",
                 "source_update_time": "approximately 08:40 Asia/Shanghai",
+                "zero_pre_close_normalized_to_null_rows": int(zero_pre_close.sum()),
                 "pagination": pagination,
             },
             partition_values={"trade_date": trade_date},
@@ -804,14 +810,15 @@ class TushareProvider:
             raise ProviderError(
                 f"Tushare historical-instrument request failed for {trade_date}: {exc}"
             ) from exc
-        if raw.empty:
-            raise ProviderError(
-                f"Tushare returned no historical instruments for {trade_date}"
-            )
-        frame = raw.rename(columns={"ts_code": "symbol"}).copy()
-        frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
-        frame["trade_date"] = _parse_yyyymmdd(frame["trade_date"])
-        frame["list_date"] = _parse_yyyymmdd(frame["list_date"])
+        reconstructed = raw.empty
+        if reconstructed:
+            frame = self._reconstruct_historical_instruments(trade_date)
+        else:
+            frame = raw.rename(columns={"ts_code": "symbol"}).copy()
+            frame["symbol"] = frame["symbol"].map(normalize_cn_symbol)
+            frame["trade_date"] = _parse_yyyymmdd(frame["trade_date"])
+            frame["list_date"] = _parse_yyyymmdd(frame["list_date"])
+            frame["universe_snapshot_method"] = "vendor_bak_basic"
         frame["source"] = self.name
         frame["ingested_at"] = _utc_now()
         return FetchResult(
@@ -819,18 +826,65 @@ class TushareProvider:
             provider=self.name,
             frame=frame.sort_values(["trade_date", "symbol"]).reset_index(drop=True),
             query={
-                "endpoint": "bak_basic",
+                "endpoint": (
+                    "stock_basic_all_status_interval_reconstruction"
+                    if reconstructed
+                    else "bak_basic"
+                ),
                 "trade_date": trade_date,
                 "fields": fields,
                 "page_size": TUSHARE_PAGE_SIZES["bak_basic"],
             },
             metadata={
                 "snapshot_semantics": "historical daily stock universe",
-                "history_start": "2016-01-01",
+                "bak_basic_empty_fallback_used": reconstructed,
+                "fallback_semantics": (
+                    "all-status security master filtered by effective listing interval; "
+                    "event boundaries are not exposed as research features"
+                ),
+                "research_feature_allowed": False,
                 "pagination": pagination,
             },
             partition_values={"trade_date": trade_date},
         ).validate()
+
+    def _reconstruct_historical_instruments(self, trade_date: str) -> pd.DataFrame:
+        master = self._instrument_master_cache
+        if master is None:
+            master = self.fetch_instruments().frame
+        date = pd.Timestamp(trade_date).normalize()
+        work = master.copy()
+        work["list_date"] = pd.to_datetime(
+            work["list_date"], errors="coerce"
+        ).dt.normalize()
+        work["delist_date"] = pd.to_datetime(
+            work["delist_date"], errors="coerce"
+        ).dt.normalize()
+        eligible = work.loc[
+            work["instrument_kind"].eq("stock")
+            & work["symbol"].astype(str).str.fullmatch(r"\d{6}\.(SH|SZ|BJ)")
+            & work["list_date"].notna()
+            & work["list_date"].le(date)
+            & (work["delist_date"].isna() | work["delist_date"].ge(date))
+        ].copy()
+        if eligible.empty:
+            raise ProviderError(
+                f"security-master interval reconstruction is empty for {trade_date}"
+            )
+        eligible["trade_date"] = date
+        eligible["universe_snapshot_method"] = (
+            "all_status_security_master_effective_interval"
+        )
+        columns = [
+            "symbol",
+            "trade_date",
+            "name",
+            "industry",
+            "area",
+            "list_date",
+            "universe_snapshot_method",
+        ]
+        return eligible[columns].sort_values("symbol").reset_index(drop=True)
 
     def fetch_security_code_mappings(self) -> FetchResult:
         """Fetch the BSE old/new trading-code crosswalk as an immutable snapshot."""
