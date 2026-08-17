@@ -383,6 +383,10 @@ def _build_parser() -> argparse.ArgumentParser:
     build_tradability.add_argument("--data-root", default="data/lake")
     build_tradability.add_argument("--output-root", default="data/curated")
     build_tradability.add_argument(
+        "--prior-tradability-artifact",
+        help="promoted earlier P0.5 artifact used only to seed cross-window suspension state",
+    )
+    build_tradability.add_argument(
         "--allow-failed-promotion",
         action="store_true",
         help="retain and return a diagnostic artifact even when hard quality gates fail",
@@ -588,6 +592,11 @@ def main(argv: List[str] = None) -> int:
             end_date=args.end,
             as_of_ingested_at=args.as_of_ingested_at,
             strict=not args.allow_failed_promotion,
+            prior_tradability_artifact=(
+                Path(args.prior_tradability_artifact)
+                if args.prior_tradability_artifact
+                else None
+            ),
         )
         print(f"built tradability artifact -> {output}")
         return 0

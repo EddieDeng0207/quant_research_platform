@@ -77,10 +77,16 @@ def load_partitioned_snapshot(
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    nonempty_frames = [frame for frame in frames if not frame.empty]
+    combined = (
+        pd.concat(nonempty_frames, ignore_index=True)
+        if nonempty_frames
+        else frames[0].iloc[0:0].copy()
+    )
     return DatasetSnapshot(
         provider=provider,
         dataset=dataset,
-        frame=pd.concat(frames, ignore_index=True),
+        frame=combined,
         manifest_entries=selected,
         fingerprint=fingerprint,
     )

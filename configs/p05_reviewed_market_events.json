@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "policy": "Exact security-date overrides require a reviewed primary-source evidence chain; they never authorize research features.",
+  "nontrading_intervals": [
+    {
+      "symbol": "000033.SZ",
+      "start_date": "2016-01-01",
+      "end_date": "2017-05-23",
+      "classification": "left_censored_suspension_until_delisting_window",
+      "reason": "The security had been suspended since 2015-05-21 and did not resume trading before its delisting-window trading began on 2017-05-24.",
+      "evidence": "https://disc.static.szse.cn/disc/disk01/finalpage/2017-07-07/f4f799b7-4f94-4f48-a8f3-950e14e116f3.PDF"
+    },
+    {
+      "symbol": "600656.SH",
+      "start_date": "2016-01-01",
+      "end_date": "2016-03-28",
+      "classification": "left_censored_suspension_until_delisting_window",
+      "reason": "The first P0.5 history window begins during an existing non-trading episode; SSE states that delisting-window trading began on 2016-03-29.",
+      "evidence": "https://www.sse.com.cn/lawandrules/sselawsrules/repeal/rules/c/c_20210601_5479621.shtml"
+    }
+  ],
+  "listing_episode_exclusions": [
+    {
+      "symbol": "601399.SH",
+      "start_date": "2020-06-05",
+      "end_date": "2020-06-05",
+      "classification": "before_reviewed_relisting_episode",
+      "reason": "SSE states that the relisted A shares began trading on 2020-06-08; the preceding historical-master row is outside that listing episode.",
+      "evidence": "https://www.sse.com.cn/disclosure/announcement/listing/c/c_20200529_5113769.shtml"
+    }
+  ],
+  "unbounded_price_limit_events": [
+    {
+      "symbol": "600732.SH",
+      "trade_date": "2017-06-06",
+      "classification": "resumption_first_day_no_price_limit",
+      "evidence": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20170606_4321448.shtml"
+    },
+    {
+      "symbol": "600710.SH",
+      "trade_date": "2017-07-31",
+      "classification": "resumption_first_day_no_price_limit",
+      "evidence": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20170731_4350871.shtml"
+    },
+    {
+      "symbol": "000155.SZ",
+      "trade_date": "2017-12-18",
+      "classification": "resumption_first_day_no_price_limit",
+      "evidence": "https://static.cninfo.com.cn/finalpage/2017-12-09/1204206641.PDF"
+    },
+    {
+      "symbol": "001965.SZ",
+      "trade_date": "2017-12-25",
+      "classification": "new_listing_first_day_no_price_limit",
+      "evidence": "https://disc.static.szse.cn/disc/disk01/finalpage/2017-12-21/0c15d360-9c19-4c9f-bb2f-48b825249267.PDF"
+    },
+    {
+      "symbol": "000629.SZ",
+      "trade_date": "2018-08-24",
+      "classification": "resumption_first_day_no_price_limit",
+      "evidence": "https://static.cninfo.com.cn/finalpage/2018-08-16/1205290543.PDF"
+    },
+    {
+      "symbol": "000950.SZ",
+      "trade_date": "2018-08-28",
+      "classification": "resumption_first_day_no_price_limit",
+      "evidence": "https://disc.static.szse.cn/download/disc/disk01/finalpage/2018-08-20/d9eb1616-a62c-4aa7-a451-5852227d6fc9.PDF"
+    },
+    {
+      "symbol": "600733.SH",
+      "trade_date": "2018-09-27",
+      "classification": "reviewed_first_reopen_day_no_price_limit",
+      "evidence": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20180927_4650255.shtml"
+    },
+    {
+      "symbol": "688033.SH",
+      "trade_date": "2019-07-22",
+      "classification": "star_market_ipo_first_day_no_price_limit",
+      "evidence": "https://star.sse.com.cn/star/media/news/c/c_20190719_4866789.shtml"
+    },
+    {
+      "symbol": "600610.SH",
+      "trade_date": "2020-08-17",
+      "classification": "resumption_first_day_no_price_limit",
+      "evidence": "https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/c_20200529_10784900.shtml"
+    },
+    {
+      "symbol": "600145.SH",
+      "trade_date": "2022-03-30",
+      "classification": "delisting_window_first_day_no_price_limit",
+      "evidence": "https://edu.sse.com.cn/attention/c/10607959/files/4cf5d037fe1a4439bdc41144ab407d9e.pdf"
+    }
+  ]
+}

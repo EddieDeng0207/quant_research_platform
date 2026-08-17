@@ -1,0 +1,93 @@
+{
+  "aggregate_joint_distribution": {
+    "all_three": {
+      "rate": 1.8802513068686708e-06,
+      "rows": 20
+    },
+    "factor_and_industry": {
+      "rate": 0.00015549678307803908,
+      "rows": 1654
+    },
+    "factor_and_market_cap": {
+      "rate": 0.0,
+      "rows": 0
+    },
+    "factor_only": {
+      "rate": 0.001564557112445421,
+      "rows": 16642
+    },
+    "industry_only": {
+      "rate": 0.053433545713985946,
+      "rows": 568366
+    },
+    "market_cap_and_industry": {
+      "rate": 0.0,
+      "rows": 0
+    },
+    "market_cap_only": {
+      "rate": 0.0,
+      "rows": 0
+    },
+    "usable": {
+      "rate": 0.9448445201391837,
+      "rows": 10050194
+    }
+  },
+  "daily": {
+    "below_minimum_dates": 0,
+    "coverage": {
+      "median": 0.9505083445233071,
+      "minimum": 0.8473164115481496,
+      "p05": 0.8595505617977528
+    },
+    "dates": 2579,
+    "median_component_rates": {
+      "invalid_market_cap": 0.0,
+      "missing_factor": 0.0015305146355462024,
+      "missing_industry": 0.04813039309683605
+    },
+    "minimum_coverage_threshold": 0.8,
+    "single_fix_scenarios_below_minimum_dates": {
+      "factor": 0,
+      "industry": 0,
+      "market_cap": 0
+    }
+  },
+  "interpretation": {
+    "denominator": "P0.5 standard_research_eligible rows",
+    "factor": "inverse_pb",
+    "factor_formula": "1 / pb; rows with null, non-finite or pb <= 0 are missing",
+    "industry": "historical Shenwan L1 effective on the decision date",
+    "investment_conclusion_allowed": false,
+    "market_cap": "total_mv; rows with null, non-finite or total_mv <= 0 are invalid",
+    "outcome_labels_read": false,
+    "weekly_policy": "last open session of each W-FRI week"
+  },
+  "upstream_p05": {
+    "artifacts": 11,
+    "failed_artifacts": 0,
+    "failed_years": [],
+    "formal_p07_release_allowed": true,
+    "promoted_artifacts": 11
+  },
+  "weekly": {
+    "below_minimum_dates": 0,
+    "coverage": {
+      "median": 0.9503546081050258,
+      "minimum": 0.8475101724472002,
+      "p05": 0.859402632636656
+    },
+    "dates": 542,
+    "median_component_rates": {
+      "invalid_market_cap": 0.0,
+      "missing_factor": 0.0015324202803150555,
+      "missing_industry": 0.048267207709184926
+    },
+    "minimum_coverage_threshold": 0.8,
+    "single_fix_scenarios_below_minimum_dates": {
+      "factor": 0,
+      "industry": 0,
+      "market_cap": 0
+    }
+  }
+}
