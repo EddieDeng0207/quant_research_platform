@@ -428,6 +428,19 @@ def backtest_quality_summary(
                 "action_type", pd.Series(dtype=str)
             ).eq("delisting_cash_settlement").sum()
         ),
+        "terminal_zero_recovery_position_writeoffs": int(
+            (
+                result.corporate_action_ledger.get(
+                    "action_type", pd.Series(dtype=str)
+                ).eq("delisting_cash_settlement")
+                & pd.to_numeric(
+                    result.corporate_action_ledger.get(
+                        "quantity_before", pd.Series(dtype=float)
+                    ),
+                    errors="coerce",
+                ).gt(0)
+            ).sum()
+        ),
         "fractional_share_events": int(
             pd.to_numeric(
                 result.corporate_action_ledger.get(

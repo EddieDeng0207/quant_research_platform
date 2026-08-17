@@ -55,7 +55,11 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
         f"- 情景：{quality['scenarios']}",
         f"- 订单/执行记录：{quality['orders']}/{quality['executions']}",
         f"- 公司行为事件：{quality['corporate_action_events']}",
-        f"- 退市零回收写销事件：{quality.get('terminal_zero_recovery_writeoff_events', 0)}",
+        (
+            "- 退市终止事件/实际有持仓写销："
+            f"{quality.get('terminal_zero_recovery_writeoff_events', 0)}/"
+            f"{quality.get('terminal_zero_recovery_position_writeoffs', 0)}"
+        ),
         (
             "- 零碎股保守舍弃事件/股数："
             f"{quality.get('fractional_share_events', 0)}/"
