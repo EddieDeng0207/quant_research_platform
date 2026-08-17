@@ -24,7 +24,7 @@ class TradabilitySpec:
     price_tolerance: float = 0.0051
     block_any_suspension_event: bool = True
     stock_status_history_start: str = "2016-01-01"
-    version: str = "a_share_daily_tradability_v5_code_identity_and_bse_domain"
+    version: str = "a_share_daily_tradability_v6_reviewed_state_machine"
 
     @property
     def fingerprint(self) -> str:
@@ -42,6 +42,10 @@ def build_tradability_matrix(
     historical_instruments: Optional[pd.DataFrame] = None,
     symbol_aliases: Optional[Sequence[Dict[str, Any]]] = None,
     security_code_mappings: Optional[pd.DataFrame] = None,
+    reviewed_market_events: Optional[Dict[str, Any]] = None,
+    historical_bars_context: Optional[pd.DataFrame] = None,
+    historical_suspensions_context: Optional[pd.DataFrame] = None,
+    suspension_state_seed: Optional[Dict[str, bool]] = None,
     spec: Optional[TradabilitySpec] = None,
 ) -> pd.DataFrame:
     """Build an execution-only matrix; uncertain states are never tradable."""
@@ -54,7 +58,13 @@ def build_tradability_matrix(
             "Tushare stock_st has no authoritative history before "
             f"{spec.stock_status_history_start}; configure a reviewed fallback source"
         )
-    universe = _historical_universe(instruments, dates, historical_instruments)
+    reviewed = reviewed_market_events or _empty_reviewed_market_events()
+    _validate_reviewed_market_events(reviewed)
+    universe, normalized_pre_bse_open_rows = _historical_universe(
+        instruments, dates, historical_instruments
+    )
+    universe, residual_pre_bse_open_rows = _exclude_pre_bse_open_universe(universe)
+    pre_bse_open_universe_rows = normalized_pre_bse_open_rows + residual_pre_bse_open_rows
     bse_aliases = _bse_symbol_aliases(security_code_mappings)
     universe = _supplement_reviewed_bse_universe(universe, instruments, dates, bse_aliases)
     aliases = [*list(symbol_aliases or []), *bse_aliases]
@@ -65,7 +75,16 @@ def build_tradability_matrix(
         bars_clean, instruments, bse_aliases
     )
     universe = _supplement_reviewed_lifecycle_gaps(universe, bars_clean, instruments)
+    universe, reviewed_listing_episode_rows = _exclude_reviewed_listing_episodes(
+        universe, bars_clean, reviewed
+    )
+    universe, untraded_delist_effective_rows = _exclude_untraded_delist_effective_dates(
+        universe, bars_clean
+    )
     limits_clean = _apply_symbol_aliases(_prepare_limits(limits), aliases, "source_limit_symbol")
+    limits_clean, reviewed_unbounded_limit_rows = _apply_reviewed_unbounded_limits(
+        limits_clean, bars_clean, reviewed
+    )
     suspension_flags = _apply_symbol_aliases(
         _prepare_suspensions(suspensions), aliases, "source_suspension_symbol"
     )
@@ -84,6 +103,17 @@ def build_tradability_matrix(
         sample = outside_universe[["symbol", "trade_date"]].head(10).to_dict("records")
         raise TradabilityError(f"Daily bars fall outside the historical universe: {sample}")
 
+    suspension_seed = (
+        dict(suspension_state_seed)
+        if suspension_state_seed is not None
+        else _build_suspension_state_seed(
+            historical_bars_context,
+            historical_suspensions_context,
+            instruments,
+            aliases,
+            bse_aliases,
+        )
+    )
     matrix = (
         universe.merge(bars_clean, on=["symbol", "trade_date"], how="left", validate="one_to_one")
         .merge(limits_clean, on=["symbol", "trade_date"], how="left", validate="one_to_one")
@@ -99,6 +129,8 @@ def build_tradability_matrix(
     for column in boolean_defaults:
         matrix[column] = matrix[column].eq(True)
     matrix["has_bar"] = matrix["close"].notna()
+    matrix = _apply_suspension_state_machine(matrix, suspension_seed)
+    matrix = _apply_reviewed_nontrading_intervals(matrix, reviewed)
     matrix["has_limit_record"] = matrix["up_limit"].notna() & matrix["down_limit"].notna()
     matrix["has_bounded_price_limit"] = matrix["has_limit_record"] & (
         matrix["price_limit_regime"] == "bounded"
@@ -161,6 +193,10 @@ def build_tradability_matrix(
     matrix["tradability_version"] = spec.version
     matrix["tradability_spec_sha256"] = spec.fingerprint
     matrix.attrs["pre_bse_listing_bar_rows_excluded"] = pre_bse_listing_bar_rows
+    matrix.attrs["pre_bse_open_universe_rows_excluded"] = pre_bse_open_universe_rows
+    matrix.attrs["reviewed_listing_episode_rows_excluded"] = reviewed_listing_episode_rows
+    matrix.attrs["untraded_delist_effective_rows_excluded"] = untraded_delist_effective_rows
+    matrix.attrs["reviewed_unbounded_limit_rows"] = reviewed_unbounded_limit_rows
     return matrix.sort_values(["trade_date", "symbol"]).reset_index(drop=True)
 
 
@@ -203,6 +239,23 @@ def tradability_quality_summary(frame: pd.DataFrame) -> Dict[str, Any]:
         "pre_bse_listing_bar_rows_excluded": int(
             frame.attrs.get("pre_bse_listing_bar_rows_excluded", 0)
         ),
+        "pre_bse_open_universe_rows_excluded": int(
+            frame.attrs.get("pre_bse_open_universe_rows_excluded", 0)
+        ),
+        "reviewed_listing_episode_rows_excluded": int(
+            frame.attrs.get("reviewed_listing_episode_rows_excluded", 0)
+        ),
+        "untraded_delist_effective_rows_excluded": int(
+            frame.attrs.get("untraded_delist_effective_rows_excluded", 0)
+        ),
+        "same_day_vendor_suspension_rows": int(frame["vendor_is_suspended"].sum()),
+        "carried_forward_suspension_rows": int(frame["carried_forward_suspension"].sum()),
+        "reviewed_nontrading_interval_rows": int(
+            frame["reviewed_nontrading_interval"].sum()
+        ),
+        "reviewed_unbounded_limit_rows": int(
+            frame.attrs.get("reviewed_unbounded_limit_rows", 0)
+        ),
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
     }
@@ -217,6 +270,8 @@ def build_tradability_artifact(
     strict: bool = True,
     spec: Optional[TradabilitySpec] = None,
     alias_config_path: Optional[Path] = None,
+    reviewed_events_path: Optional[Path] = None,
+    prior_tradability_artifact: Optional[Path] = None,
 ) -> Path:
     """Create an immutable matrix from matching full-market daily snapshots."""
     spec = spec or TradabilitySpec()
@@ -242,6 +297,41 @@ def build_tradability_artifact(
     alias_bytes = Path(alias_path).read_bytes()
     alias_payload = json.loads(alias_bytes.decode("utf-8"))
     aliases = alias_payload.get("aliases", [])
+    events_path = reviewed_events_path or (
+        Path(__file__).resolve().parents[3] / "configs" / "p05_reviewed_market_events.json"
+    )
+    events_bytes = Path(events_path).read_bytes()
+    reviewed_events = json.loads(events_bytes.decode("utf-8"))
+    _validate_reviewed_market_events(reviewed_events)
+    context_snapshots: Dict[str, Any] = {}
+    prior_seed: Optional[Dict[str, bool]] = None
+    prior_identity: Optional[Dict[str, Any]] = None
+    context_end = pd.Timestamp(start_date).normalize() - pd.Timedelta(days=1)
+    if prior_tradability_artifact is not None:
+        prior_seed, prior_identity = _load_prior_tradability_seed(
+            Path(prior_tradability_artifact), pd.Timestamp(start_date).normalize()
+        )
+    elif context_end >= pd.Timestamp(spec.stock_status_history_start):
+        context_snapshots = {
+            "daily_bars_context": load_partitioned_snapshot(
+                lake_root,
+                "tushare",
+                "daily_bars",
+                spec.stock_status_history_start,
+                str(context_end.date()),
+                as_of_ingested_at,
+                columns=["symbol", "trade_date"],
+            ),
+            "daily_suspensions_context": load_partitioned_snapshot(
+                lake_root,
+                "tushare",
+                "daily_suspensions",
+                spec.stock_status_history_start,
+                str(context_end.date()),
+                as_of_ingested_at,
+                columns=["symbol", "trade_date", "suspend_type", "suspend_timing"],
+            ),
+        }
     implementation = _implementation_identity()
     partition_dates = {
         dataset: {entry["partition_values"]["trade_date"] for entry in snapshot.manifest_entries}
@@ -265,6 +355,16 @@ def build_tradability_artifact(
         historical_instruments=snapshots["historical_instruments"].frame,
         symbol_aliases=aliases,
         security_code_mappings=security_code_mappings.frame,
+        reviewed_market_events=reviewed_events,
+        historical_bars_context=(
+            context_snapshots["daily_bars_context"].frame if context_snapshots else None
+        ),
+        historical_suspensions_context=(
+            context_snapshots["daily_suspensions_context"].frame
+            if context_snapshots
+            else None
+        ),
+        suspension_state_seed=prior_seed,
         spec=spec,
     )
     quality = tradability_quality_summary(frame)
@@ -274,9 +374,19 @@ def build_tradability_artifact(
         "as_of_ingested_at": as_of_ingested_at,
         "spec_sha256": spec.fingerprint,
         "instrument_aliases_sha256": hashlib.sha256(alias_bytes).hexdigest(),
+        "reviewed_market_events_sha256": hashlib.sha256(events_bytes).hexdigest(),
         "implementation_sha256": implementation["tree_sha256"],
         "input_fingerprints": {
             **{dataset: snapshot.fingerprint for dataset, snapshot in snapshots.items()},
+            **{
+                dataset: snapshot.fingerprint
+                for dataset, snapshot in context_snapshots.items()
+            },
+            **(
+                {"prior_tradability_artifact": prior_identity["parquet_sha256"]}
+                if prior_identity is not None
+                else {}
+            ),
             "instruments": instruments.fingerprint,
             "security_code_mappings": security_code_mappings.fingerprint,
         },
@@ -301,6 +411,7 @@ def build_tradability_artifact(
             dataset: _manifest_references(snapshot.manifest_entries)
             for dataset, snapshot in {
                 **snapshots,
+                **context_snapshots,
                 "instruments": instruments,
                 "security_code_mappings": security_code_mappings,
             }.items()
@@ -312,11 +423,26 @@ def build_tradability_artifact(
             "st_automatically_excluded_from_standard_universe": True,
             "security_code_changes_require_reviewed_alias": True,
             "bse_historical_codes_restored_from_versioned_transition_policy": True,
+            "bse_a_share_domain_starts_at_market_open": str(_BSE_MARKET_OPEN_DATE.date()),
+            "suspension_state_carries_until_resumption_or_observed_bar": True,
+            "reviewed_market_events_are_exact_symbol_date_or_interval_rules": True,
         },
         "instrument_aliases": {
             "path": str(alias_path),
             "sha256": hashlib.sha256(alias_bytes).hexdigest(),
             "version": alias_payload.get("version"),
+        },
+        "reviewed_market_events": {
+            "path": str(events_path),
+            "sha256": hashlib.sha256(events_bytes).hexdigest(),
+            "version": reviewed_events.get("version"),
+            "nontrading_intervals": len(reviewed_events.get("nontrading_intervals", [])),
+            "listing_episode_exclusions": len(
+                reviewed_events.get("listing_episode_exclusions", [])
+            ),
+            "unbounded_price_limit_events": len(
+                reviewed_events.get("unbounded_price_limit_events", [])
+            ),
         },
         "security_identity_policy": {
             "bse_policy_version": "bse_920_transition_v1",
@@ -327,6 +453,7 @@ def build_tradability_artifact(
             "mapping_rows": len(security_code_mappings.frame),
             "sources": [
                 "https://tushare.pro/document/2?doc_id=375",
+                "https://www.bse.cn/company/introduce.html",
                 "https://www.bse.cn/jygl_list/200021626.html",
                 "https://www.bse.cn/important_news/200025603.html",
                 "https://www.bse.cn/important_news/200026735.html",
@@ -334,6 +461,8 @@ def build_tradability_artifact(
         },
         "implementation": implementation,
     }
+    if prior_identity is not None:
+        manifest["inputs"]["prior_tradability_artifact"] = [prior_identity]
     _write_immutable_json(manifest, destination / "manifest.json")
     if strict and not quality["promotion_passed"]:
         raise TradabilityError(
@@ -343,11 +472,280 @@ def build_tradability_artifact(
     return destination
 
 
+def _empty_reviewed_market_events() -> Dict[str, Any]:
+    return {
+        "version": 0,
+        "nontrading_intervals": [],
+        "listing_episode_exclusions": [],
+        "unbounded_price_limit_events": [],
+    }
+
+
+def _load_prior_tradability_seed(
+    artifact: Path, requested_start: pd.Timestamp
+) -> tuple[Dict[str, bool], Dict[str, Any]]:
+    manifest_path = artifact / "manifest.json"
+    parquet_path = artifact / "tradability.parquet"
+    if not manifest_path.exists() or not parquet_path.exists():
+        raise TradabilityError(f"Prior P0.5 artifact is incomplete: {artifact}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not manifest.get("quality", {}).get("promotion_passed"):
+        raise TradabilityError("Prior P0.5 artifact did not pass promotion")
+    parquet_sha = _sha256(parquet_path)
+    if parquet_sha != manifest.get("output", {}).get("sha256"):
+        raise TradabilityError("Prior P0.5 artifact Parquet hash does not match its manifest")
+    prior_end = pd.Timestamp(manifest.get("identity", {}).get("end_date")).normalize()
+    if prior_end >= requested_start:
+        raise TradabilityError(
+            f"Prior P0.5 artifact ends on {prior_end.date()}, not before "
+            f"{requested_start.date()}"
+        )
+    frame = pd.read_parquet(
+        parquet_path,
+        columns=["symbol", "trade_date", "has_bar", "is_suspended"],
+    )
+    frame["trade_date"] = pd.to_datetime(frame["trade_date"]).dt.normalize()
+    latest = frame.sort_values(["symbol", "trade_date"]).drop_duplicates("symbol", keep="last")
+    seed = {
+        str(row["symbol"]): bool(row["is_suspended"] and not row["has_bar"])
+        for row in latest.to_dict("records")
+    }
+    return seed, {
+        "artifact_id": manifest.get("artifact_id"),
+        "path": str(parquet_path),
+        "parquet_sha256": parquet_sha,
+        "logical_frame_sha256": manifest.get("logical_frame_sha256"),
+        "end_date": str(prior_end.date()),
+        "seed_symbols": len(seed),
+    }
+
+
+def _validate_reviewed_market_events(payload: Dict[str, Any]) -> None:
+    if not isinstance(payload.get("version"), int):
+        raise TradabilityError("Reviewed P0.5 market-event policy requires an integer version")
+    interval_fields = {"symbol", "start_date", "end_date", "classification", "evidence"}
+    event_fields = {"symbol", "trade_date", "classification", "evidence"}
+    interval_keys = ("nontrading_intervals", "listing_episode_exclusions")
+    for key in interval_keys:
+        records = payload.get(key, [])
+        if not isinstance(records, list):
+            raise TradabilityError(f"Reviewed P0.5 policy {key} must be a list")
+        seen = set()
+        for record in records:
+            missing = sorted(interval_fields - set(record))
+            if missing:
+                raise TradabilityError(f"Reviewed P0.5 {key} record missing fields: {missing}")
+            start = pd.Timestamp(record["start_date"]).normalize()
+            end = pd.Timestamp(record["end_date"]).normalize()
+            if start > end:
+                raise TradabilityError(f"Reviewed P0.5 {key} interval is reversed: {record}")
+            identity = (str(record["symbol"]), start, end)
+            if identity in seen:
+                raise TradabilityError(f"Duplicate reviewed P0.5 {key} interval: {identity}")
+            seen.add(identity)
+            if not str(record["evidence"]).startswith("https://"):
+                raise TradabilityError(f"Reviewed P0.5 {key} evidence must use HTTPS")
+    events = payload.get("unbounded_price_limit_events", [])
+    if not isinstance(events, list):
+        raise TradabilityError("Reviewed P0.5 unbounded_price_limit_events must be a list")
+    seen_events = set()
+    for record in events:
+        missing = sorted(event_fields - set(record))
+        if missing:
+            raise TradabilityError(
+                f"Reviewed P0.5 unbounded-price-limit event missing fields: {missing}"
+            )
+        identity = (str(record["symbol"]), pd.Timestamp(record["trade_date"]).normalize())
+        if identity in seen_events:
+            raise TradabilityError(f"Duplicate reviewed unbounded-price-limit event: {identity}")
+        seen_events.add(identity)
+        if not str(record["evidence"]).startswith("https://"):
+            raise TradabilityError("Reviewed unbounded-price-limit evidence must use HTTPS")
+
+
+def _exclude_pre_bse_open_universe(universe: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Keep pre-opening NEEQ Select snapshots outside the A-share/BSE domain."""
+    mask = universe["symbol"].astype(str).str.endswith(".BJ") & (
+        universe["trade_date"] < _BSE_MARKET_OPEN_DATE
+    )
+    return universe.loc[~mask].copy(), int(mask.sum())
+
+
+def _exclude_reviewed_listing_episodes(
+    universe: pd.DataFrame,
+    bars: pd.DataFrame,
+    reviewed: Dict[str, Any],
+) -> tuple[pd.DataFrame, int]:
+    excluded = pd.Series(False, index=universe.index)
+    for record in reviewed.get("listing_episode_exclusions", []):
+        start = pd.Timestamp(record["start_date"]).normalize()
+        end = pd.Timestamp(record["end_date"]).normalize()
+        excluded |= (
+            universe["symbol"].eq(str(record["symbol"]))
+            & universe["trade_date"].between(start, end)
+        )
+    if excluded.any():
+        excluded_keys = universe.loc[excluded, ["symbol", "trade_date"]]
+        observed = excluded_keys.merge(
+            bars[["symbol", "trade_date"]],
+            on=["symbol", "trade_date"],
+            how="inner",
+        )
+        if not observed.empty:
+            raise TradabilityError(
+                "Reviewed listing-episode exclusion conflicts with observed bars: "
+                f"{observed.head(10).to_dict('records')}"
+            )
+    return universe.loc[~excluded].copy(), int(excluded.sum())
+
+
+def _exclude_untraded_delist_effective_dates(
+    universe: pd.DataFrame, bars: pd.DataFrame
+) -> tuple[pd.DataFrame, int]:
+    """Exclude a delisting effective date only when no exchange bar traded that day."""
+    observed = pd.MultiIndex.from_frame(bars[["symbol", "trade_date"]])
+    keys = pd.MultiIndex.from_frame(universe[["symbol", "trade_date"]])
+    delist_date = pd.to_datetime(universe["delist_date"], errors="coerce").dt.normalize()
+    excluded = delist_date.notna() & (universe["trade_date"] >= delist_date) & ~keys.isin(observed)
+    return universe.loc[~excluded].copy(), int(excluded.sum())
+
+
+def _apply_reviewed_unbounded_limits(
+    limits: pd.DataFrame,
+    bars: pd.DataFrame,
+    reviewed: Dict[str, Any],
+) -> tuple[pd.DataFrame, int]:
+    result = limits.copy()
+    applied = 0
+    for record in reviewed.get("unbounded_price_limit_events", []):
+        symbol = str(record["symbol"])
+        trade_date = pd.Timestamp(record["trade_date"]).normalize()
+        bar_match = bars["symbol"].eq(symbol) & bars["trade_date"].eq(trade_date)
+        if not bar_match.any():
+            continue
+        limit_match = result["symbol"].eq(symbol) & result["trade_date"].eq(trade_date)
+        if limit_match.any():
+            result.loc[limit_match, ["up_limit", "down_limit"]] = [99999.99, 0.0]
+            result.loc[limit_match, "price_limit_regime"] = "none_reviewed_market_event"
+        else:
+            bar = bars.loc[bar_match].iloc[0]
+            addition = pd.DataFrame(
+                [
+                    {
+                        "symbol": symbol,
+                        "trade_date": trade_date,
+                        "limit_pre_close": bar.get("bar_pre_close", np.nan),
+                        "up_limit": 99999.99,
+                        "down_limit": 0.0,
+                        "price_limit_regime": "none_reviewed_market_event",
+                        "source_limit_symbol": f"reviewed_market_event:{symbol}",
+                    }
+                ]
+            )
+            result = addition if result.empty else pd.concat([result, addition], ignore_index=True)
+        applied += 1
+    if result.duplicated(["symbol", "trade_date"]).any():
+        raise TradabilityError("Reviewed price-limit events created duplicate symbol-date keys")
+    return result, applied
+
+
+def _build_suspension_state_seed(
+    bars_context: Optional[pd.DataFrame],
+    suspensions_context: Optional[pd.DataFrame],
+    instruments: pd.DataFrame,
+    aliases: Sequence[Dict[str, Any]],
+    bse_aliases: Sequence[Dict[str, Any]],
+) -> Dict[str, bool]:
+    if bars_context is None or suspensions_context is None:
+        return {}
+    bar_keys = bars_context[["symbol", "trade_date"]].copy()
+    bar_keys["trade_date"] = pd.to_datetime(bar_keys["trade_date"]).dt.normalize()
+    if bar_keys.duplicated(["symbol", "trade_date"]).any():
+        raise TradabilityError("Historical bar context contains duplicate keys")
+    bar_keys = _apply_symbol_aliases(bar_keys, aliases, "source_bar_symbol")
+    bar_keys, _ = _exclude_pre_bse_listing_bars(bar_keys, instruments, bse_aliases)
+    bar_keys["context_has_bar"] = True
+    suspension_flags = _apply_symbol_aliases(
+        _prepare_suspensions(suspensions_context), aliases, "source_suspension_symbol"
+    )
+    events = bar_keys[["symbol", "trade_date", "context_has_bar"]].merge(
+        suspension_flags[["symbol", "trade_date", "is_suspended", "is_resumption"]],
+        on=["symbol", "trade_date"],
+        how="outer",
+    )
+    events["context_has_bar"] = events["context_has_bar"].eq(True)
+    events["is_suspended"] = events["is_suspended"].eq(True)
+    events["is_resumption"] = events["is_resumption"].eq(True)
+    start = events["is_suspended"] & ~events["context_has_bar"]
+    reset = events["context_has_bar"] | (events["is_resumption"] & ~start)
+    events = events.loc[reset | start].copy()
+    events["state_after_event"] = start.loc[events.index]
+    latest = events.sort_values(["symbol", "trade_date"]).drop_duplicates(
+        "symbol", keep="last"
+    )
+    return {
+        str(row["symbol"]): bool(row["state_after_event"])
+        for row in latest.to_dict("records")
+    }
+
+
+def _apply_suspension_state_machine(
+    matrix: pd.DataFrame, initial_state: Dict[str, bool]
+) -> pd.DataFrame:
+    result = matrix.sort_values(["symbol", "trade_date"]).copy()
+    result["vendor_is_suspended"] = result["is_suspended"].eq(True)
+    changes = pd.Series(pd.NA, index=result.index, dtype="boolean")
+    start = result["vendor_is_suspended"] & ~result["has_bar"]
+    reset = result["has_bar"] | (result["is_resumption"] & ~start)
+    changes.loc[reset] = False
+    changes.loc[start] = True
+    state = changes.groupby(result["symbol"], observed=True).ffill()
+    seed = result["symbol"].map(initial_state).astype("boolean")
+    state = state.fillna(seed).fillna(False).astype(bool)
+    result["carried_forward_suspension"] = (
+        state
+        & ~result["vendor_is_suspended"]
+        & ~result["has_bar"]
+        & ~result["is_resumption"]
+    )
+    result["reviewed_nontrading_interval"] = False
+    result["is_suspended"] = (
+        result["vendor_is_suspended"] | result["carried_forward_suspension"]
+    )
+    result["suspension_state_source"] = np.select(
+        [result["vendor_is_suspended"], result["carried_forward_suspension"]],
+        ["same_day_vendor_S", "carried_forward_vendor_S"],
+        default="",
+    )
+    return result.sort_index()
+
+
+def _apply_reviewed_nontrading_intervals(
+    matrix: pd.DataFrame, reviewed: Dict[str, Any]
+) -> pd.DataFrame:
+    result = matrix.copy()
+    for record in reviewed.get("nontrading_intervals", []):
+        start = pd.Timestamp(record["start_date"]).normalize()
+        end = pd.Timestamp(record["end_date"]).normalize()
+        applies = (
+            result["symbol"].eq(str(record["symbol"]))
+            & result["trade_date"].between(start, end)
+            & ~result["has_bar"]
+            & ~result["is_suspended"]
+        )
+        result.loc[applies, "reviewed_nontrading_interval"] = True
+        result.loc[applies, "is_suspended"] = True
+        result.loc[applies, "suspension_state_source"] = (
+            "reviewed_nontrading_interval:" + str(record["classification"])
+        )
+    return result
+
+
 def _historical_universe(
     instruments: pd.DataFrame,
     dates: pd.DatetimeIndex,
     historical_instruments: Optional[pd.DataFrame] = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, int]:
     required = {"symbol", "name", "exchange", "list_date", "delist_date"}
     missing = sorted(required - set(instruments.columns))
     if missing:
@@ -358,6 +756,12 @@ def _historical_universe(
         master = master.loc[master["list_status"] != "G"]
     master["list_date"] = pd.to_datetime(master["list_date"], errors="coerce").dt.normalize()
     master["delist_date"] = pd.to_datetime(master["delist_date"], errors="coerce").dt.normalize()
+    bse_master_rows = master["exchange"].astype(str).eq("BSE") | master[
+        "symbol"
+    ].astype(str).str.endswith(".BJ")
+    master.loc[bse_master_rows, "list_date"] = master.loc[
+        bse_master_rows, "list_date"
+    ].clip(lower=_BSE_MARKET_OPEN_DATE)
     master = master.sort_values(["symbol", "list_date"]).drop_duplicates("symbol", keep="last")
     if historical_instruments is not None:
         history = historical_instruments.copy()
@@ -369,6 +773,13 @@ def _historical_universe(
             )
         history["trade_date"] = pd.to_datetime(history["trade_date"]).dt.normalize()
         history["list_date"] = pd.to_datetime(history["list_date"], errors="coerce").dt.normalize()
+        history_bse_rows = history["symbol"].astype(str).str.endswith(".BJ")
+        normalized_pre_bse_open_rows = int(
+            (history_bse_rows & (history["trade_date"] < _BSE_MARKET_OPEN_DATE)).sum()
+        )
+        history.loc[history_bse_rows, "list_date"] = history.loc[
+            history_bse_rows, "list_date"
+        ].clip(lower=_BSE_MARKET_OPEN_DATE)
         history = history.loc[
             history["trade_date"].isin(dates)
             & history["symbol"].astype(str).str.fullmatch(r"\d{6}\.(SH|SZ|BJ)")
@@ -401,7 +812,7 @@ def _historical_universe(
                 "master_record_present",
                 "universe_source",
             ]
-        ]
+        ], normalized_pre_bse_open_rows
     if master["list_date"].isna().any():
         sample = master.loc[master["list_date"].isna(), "symbol"].head(5).tolist()
         raise TradabilityError(f"Tradable instruments missing list_date: {sample}")
@@ -422,7 +833,7 @@ def _historical_universe(
     result = pd.concat(chunks, ignore_index=True)
     if result.duplicated(["symbol", "trade_date"]).any():
         raise TradabilityError("Historical universe contains duplicate symbol-date keys")
-    return result
+    return result, 0
 
 
 def _supplement_reviewed_bse_universe(
@@ -453,6 +864,7 @@ def _supplement_reviewed_bse_universe(
         master = master.loc[master["list_status"] != "G"]
     master["list_date"] = pd.to_datetime(master["list_date"], errors="coerce").dt.normalize()
     master["delist_date"] = pd.to_datetime(master["delist_date"], errors="coerce").dt.normalize()
+    master["list_date"] = master["list_date"].clip(lower=_BSE_MARKET_OPEN_DATE)
     if master["list_date"].isna().any():
         raise TradabilityError("reviewed BSE master rows require list_date")
     master = master.sort_values(["symbol", "list_date"]).drop_duplicates("symbol", keep="last")
@@ -573,7 +985,7 @@ def _exclude_pre_bse_listing_bars(
     symbol namespace.  Those observations are not A-share trading history and
     must not expand the P0.5 research universe backwards in time.
     """
-    if not bse_aliases or bars.empty:
+    if bars.empty:
         return bars, 0
     required = {"symbol", "exchange", "list_date"}
     missing = sorted(required - set(instruments.columns))
@@ -593,7 +1005,9 @@ def _exclude_pre_bse_listing_bars(
         | instruments["symbol"].astype(str).str.endswith(".BJ")
     ].copy()
     valid_from: Dict[str, pd.Timestamp] = {
-        str(row["symbol"]): pd.Timestamp(row["list_date"]).normalize()
+        str(row["symbol"]): max(
+            pd.Timestamp(row["list_date"]).normalize(), _BSE_MARKET_OPEN_DATE
+        )
         for row in bse_master.to_dict("records")
         if pd.notna(row["list_date"])
     }
@@ -602,10 +1016,16 @@ def _exclude_pre_bse_listing_bars(
         listed = listing_dates.get(current)
         if listed is None:
             raise TradabilityError(f"reviewed BSE mapping lacks master listing date: {current}")
-        valid_from[str(alias["historical_symbol"])] = pd.Timestamp(listed).normalize()
-        valid_from[current] = pd.Timestamp(listed).normalize()
+        effective_listed = max(pd.Timestamp(listed).normalize(), _BSE_MARKET_OPEN_DATE)
+        valid_from[str(alias["historical_symbol"])] = effective_listed
+        valid_from[current] = effective_listed
     minimum_dates = bars["symbol"].map(valid_from)
-    excluded = minimum_dates.notna() & (bars["trade_date"] < minimum_dates)
+    excluded = pd.Series(False, index=bars.index)
+    bounded = minimum_dates.notna()
+    excluded.loc[bounded] = (
+        bars.loc[bounded, "trade_date"]
+        < pd.to_datetime(minimum_dates.loc[bounded]).dt.normalize()
+    )
     return bars.loc[~excluded].copy(), int(excluded.sum())
 
 
@@ -749,6 +1169,7 @@ def _apply_symbol_aliases(
     return pd.DataFrame(collapsed).reset_index(drop=True)
 
 
+_BSE_MARKET_OPEN_DATE = pd.Timestamp("2021-11-15")
 _BSE_NEW_CODE_POLICY_START = pd.Timestamp("2024-04-22")
 _BSE_PILOT_EFFECTIVE_DATE = pd.Timestamp("2025-05-06")
 _BSE_FULL_EFFECTIVE_DATE = pd.Timestamp("2025-10-09")

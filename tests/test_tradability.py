@@ -356,3 +356,233 @@ def test_listing_day_bar_can_repair_a_bounded_historical_master_gap():
     row = matrix.set_index("symbol").loc["301260.SZ"]
     assert row["has_bar"]
     assert row["universe_source"].endswith("current_master_lifecycle_validated_observed_bar")
+
+
+def test_suspension_state_carries_until_an_observed_bar_resets_it():
+    instruments = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "name": ["测试"],
+            "exchange": ["SZSE"],
+            "list_status": ["L"],
+            "list_date": ["2020-01-01"],
+            "delist_date": [pd.NaT],
+        }
+    )
+    history = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"] * 3,
+            "trade_date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "name": ["测试"] * 3,
+            "list_date": ["2020-01-01"] * 3,
+        }
+    )
+    bars = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2024-01-04"],
+            "open": [10.0],
+            "high": [10.5],
+            "low": [9.8],
+            "close": [10.2],
+            "pre_close": [10.0],
+            "volume": [1000.0],
+            "amount": [10200.0],
+        }
+    )
+    limits = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2024-01-04"],
+            "pre_close": [10.0],
+            "up_limit": [11.0],
+            "down_limit": [9.0],
+        }
+    )
+    suspensions = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2024-01-02"],
+            "suspend_type": ["S"],
+            "suspend_timing": [None],
+        }
+    )
+    matrix = build_tradability_matrix(
+        bars,
+        limits,
+        suspensions,
+        pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
+        instruments,
+        ["2024-01-02", "2024-01-03", "2024-01-04"],
+        historical_instruments=history,
+    ).set_index("trade_date")
+
+    assert matrix.loc[pd.Timestamp("2024-01-02"), "suspension_state_source"] == (
+        "same_day_vendor_S"
+    )
+    assert matrix.loc[pd.Timestamp("2024-01-03"), "suspension_state_source"] == (
+        "carried_forward_vendor_S"
+    )
+    assert matrix.loc[pd.Timestamp("2024-01-03"), "is_suspended"]
+    assert not matrix.loc[pd.Timestamp("2024-01-04"), "is_suspended"]
+
+
+def test_same_day_suspend_and_resume_without_a_bar_stays_suspended():
+    bars, limits, _, status, instruments = _inputs()
+    bars = bars.loc[bars["symbol"].eq("000001.SZ")].copy()
+    bars["trade_date"] = "2024-01-04"
+    limits = limits.loc[limits["symbol"].eq("000001.SZ")].copy()
+    limits["trade_date"] = "2024-01-04"
+    history = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"] * 3,
+            "trade_date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "name": ["测试"] * 3,
+            "list_date": ["2020-01-01"] * 3,
+        }
+    )
+    suspensions = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "trade_date": ["2024-01-02", "2024-01-02"],
+            "suspend_type": ["R", "S"],
+            "suspend_timing": [None, "09:30-09:30"],
+        }
+    )
+    matrix = build_tradability_matrix(
+        bars,
+        limits,
+        suspensions,
+        status.iloc[0:0],
+        instruments.loc[instruments["symbol"].eq("000001.SZ")],
+        ["2024-01-02", "2024-01-03", "2024-01-04"],
+        historical_instruments=history,
+    ).set_index("trade_date")
+
+    assert matrix.loc[pd.Timestamp("2024-01-02"), "is_resumption"]
+    assert matrix.loc[pd.Timestamp("2024-01-02"), "vendor_is_suspended"]
+    assert matrix.loc[pd.Timestamp("2024-01-03"), "carried_forward_suspension"]
+    assert not matrix.loc[pd.Timestamp("2024-01-04"), "is_suspended"]
+
+
+def test_bse_vendor_list_date_cannot_precede_exchange_market_open():
+    instruments = pd.DataFrame(
+        {
+            "symbol": ["830799.BJ", "000001.SZ"],
+            "name": ["精选层历史", "深证"],
+            "exchange": ["BSE", "SZSE"],
+            "list_status": ["L", "L"],
+            "list_date": ["2020-07-27", "2020-01-01"],
+            "delist_date": [pd.NaT, pd.NaT],
+        }
+    )
+    history = pd.DataFrame(
+        {
+            "symbol": ["830799.BJ", "000001.SZ"],
+            "trade_date": ["2020-07-27", "2020-07-27"],
+            "name": ["精选层历史", "深证"],
+            "list_date": ["2020-07-27", "2020-01-01"],
+        }
+    )
+    bars = pd.DataFrame(
+        {
+            "symbol": ["830799.BJ", "000001.SZ"],
+            "trade_date": ["2020-07-27", "2020-07-27"],
+            "open": [10.0, 10.0],
+            "high": [10.5, 10.5],
+            "low": [9.8, 9.8],
+            "close": [10.2, 10.2],
+            "pre_close": [10.0, 10.0],
+            "volume": [1000.0, 1000.0],
+            "amount": [10200.0, 10200.0],
+        }
+    )
+    limits = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2020-07-27"],
+            "pre_close": [10.0],
+            "up_limit": [11.0],
+            "down_limit": [9.0],
+        }
+    )
+    matrix = build_tradability_matrix(
+        bars,
+        limits,
+        pd.DataFrame(columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]),
+        pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
+        instruments,
+        ["2020-07-27"],
+        historical_instruments=history,
+    )
+
+    assert set(matrix["symbol"]) == {"000001.SZ"}
+    quality = tradability_quality_summary(matrix)
+    assert quality["pre_bse_open_universe_rows_excluded"] == 1
+    assert quality["pre_bse_listing_bar_rows_excluded"] == 1
+
+    opening_history = history.loc[history["symbol"].eq("830799.BJ")].copy()
+    opening_history["trade_date"] = "2021-11-15"
+    opening_bar = bars.loc[bars["symbol"].eq("830799.BJ")].copy()
+    opening_bar["trade_date"] = "2021-11-15"
+    opening_limit = pd.DataFrame(
+        {
+            "symbol": ["830799.BJ"],
+            "trade_date": ["2021-11-15"],
+            "pre_close": [10.0],
+            "up_limit": [99999.99],
+            "down_limit": [0.0],
+            "price_limit_regime": ["none_vendor_sentinel"],
+        }
+    )
+    opening = build_tradability_matrix(
+        opening_bar,
+        opening_limit,
+        pd.DataFrame(columns=["symbol", "trade_date", "suspend_type", "suspend_timing"]),
+        pd.DataFrame(columns=["symbol", "trade_date", "status_name"]),
+        instruments.loc[instruments["symbol"].eq("830799.BJ")],
+        ["2021-11-15"],
+        historical_instruments=opening_history,
+    )
+    assert opening.iloc[0]["list_date"] == pd.Timestamp("2021-11-15")
+
+
+def test_reviewed_unbounded_event_repairs_only_the_exact_bar_date():
+    bars, _, suspensions, status, instruments = _inputs()
+    bars = bars.loc[bars["symbol"].eq("000001.SZ")].copy()
+    history = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2024-01-02"],
+            "name": ["测试"],
+            "list_date": ["2020-01-01"],
+        }
+    )
+    reviewed = {
+        "version": 1,
+        "nontrading_intervals": [],
+        "listing_episode_exclusions": [],
+        "unbounded_price_limit_events": [
+            {
+                "symbol": "000001.SZ",
+                "trade_date": "2024-01-02",
+                "classification": "reviewed_test_event",
+                "evidence": "https://example.test/exchange-evidence",
+            }
+        ],
+    }
+    matrix = build_tradability_matrix(
+        bars,
+        pd.DataFrame(columns=["symbol", "trade_date", "pre_close", "up_limit", "down_limit"]),
+        suspensions.iloc[0:0],
+        status.iloc[0:0],
+        instruments.loc[instruments["symbol"].eq("000001.SZ")],
+        ["2024-01-02"],
+        historical_instruments=history,
+        reviewed_market_events=reviewed,
+    )
+
+    row = matrix.iloc[0]
+    assert row["price_limit_regime"] == "none_reviewed_market_event"
+    assert not row["bar_without_limit"]
+    assert tradability_quality_summary(matrix)["promotion_passed"]

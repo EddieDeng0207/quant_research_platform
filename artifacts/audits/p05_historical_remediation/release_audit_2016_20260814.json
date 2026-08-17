@@ -1,0 +1,400 @@
+{
+  "schema_version": "p05_historical_release_audit_v1",
+  "passed": true,
+  "artifact_count": 11,
+  "all_physical_hashes_match": true,
+  "all_artifacts_promoted": true,
+  "all_hard_failures_zero": true,
+  "implementation_hashes": [
+    "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb"
+  ],
+  "chain_errors": [],
+  "bse_market_open_probe": {
+    "pre_open_rows": 0,
+    "opening_day_rows": 81,
+    "post_open_rows": 2782,
+    "list_date_before_market_open_rows": 0
+  },
+  "suspension_state_probe": {
+    "symbol": "688766.SH",
+    "passed": true,
+    "rows": [
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-11-25",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": true,
+        "carried_forward_suspension": false,
+        "suspension_state_source": "same_day_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-11-26",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": true,
+        "carried_forward_suspension": false,
+        "suspension_state_source": "same_day_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-11-27",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-11-28",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-01",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-02",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-03",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-04",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-05",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": true,
+        "suspension_state_source": "carried_forward_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-08",
+        "has_bar": false,
+        "is_suspended": true,
+        "vendor_is_suspended": true,
+        "carried_forward_suspension": false,
+        "suspension_state_source": "same_day_vendor_S"
+      },
+      {
+        "symbol": "688766.SH",
+        "trade_date": "2025-12-09",
+        "has_bar": true,
+        "is_suspended": false,
+        "vendor_is_suspended": false,
+        "carried_forward_suspension": false,
+        "suspension_state_source": ""
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "artifact_id": "1f0a42e8799f9438ba54",
+      "start_date": "2016-01-01",
+      "end_date": "2016-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=1f0a42e8799f9438ba54/tradability.parquet",
+      "parquet_sha256": "fa29537d580424351a047eb2a0cbc698f44a89fb5e276a2b0ded07db5afdfb8b",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 704144,
+        "symbols": 3035,
+        "trading_dates": 244,
+        "carried_forward_suspension_rows": 590,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 10655,
+        "reviewed_unbounded_limit_rows": 0
+      }
+    },
+    {
+      "artifact_id": "5f55ae6ce9ca249b44d1",
+      "start_date": "2017-01-01",
+      "end_date": "2017-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=5f55ae6ce9ca249b44d1/tradability.parquet",
+      "parquet_sha256": "dd7ac183832d4878a7c71dff4df15b7732c2fe98d806b1e0d6dcea9fd60f3e83",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 799059,
+        "symbols": 3472,
+        "trading_dates": 244,
+        "carried_forward_suspension_rows": 1437,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 10431,
+        "reviewed_unbounded_limit_rows": 4
+      }
+    },
+    {
+      "artifact_id": "51d9f6e09361cb29bf69",
+      "start_date": "2018-01-01",
+      "end_date": "2018-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=51d9f6e09361cb29bf69/tradability.parquet",
+      "parquet_sha256": "ea0ce2ba5d10c8dd47744e3b1d5da5469d5590483a56fc36fa9a56b0865586c6",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 856792,
+        "symbols": 3574,
+        "trading_dates": 243,
+        "carried_forward_suspension_rows": 1173,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 6952,
+        "reviewed_unbounded_limit_rows": 3
+      }
+    },
+    {
+      "artifact_id": "f182de241a76d3dc97f4",
+      "start_date": "2019-01-01",
+      "end_date": "2019-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=f182de241a76d3dc97f4/tradability.parquet",
+      "parquet_sha256": "176745ac544826efe4391c44bdca365ed7e151f61decaefe5c6582d272046a1b",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 890238,
+        "symbols": 3771,
+        "trading_dates": 244,
+        "carried_forward_suspension_rows": 1888,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 8845,
+        "reviewed_unbounded_limit_rows": 1
+      }
+    },
+    {
+      "artifact_id": "4f34f1bac4c2c94be621",
+      "start_date": "2020-01-01",
+      "end_date": "2020-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=4f34f1bac4c2c94be621/tradability.parquet",
+      "parquet_sha256": "405c4c64a47747029f35705530df92208fa76903fbf7cdb5efa0f0780b440d73",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 951957,
+        "symbols": 4156,
+        "trading_dates": 243,
+        "carried_forward_suspension_rows": 2975,
+        "pre_bse_open_universe_rows_excluded": 130,
+        "pre_bse_listing_bar_rows_excluded": 17926,
+        "reviewed_unbounded_limit_rows": 1
+      }
+    },
+    {
+      "artifact_id": "ba470cc29a992a83289f",
+      "start_date": "2021-01-01",
+      "end_date": "2021-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=ba470cc29a992a83289f/tradability.parquet",
+      "parquet_sha256": "d1617581e5064c7c232cfa81f0e152b46dab6df8924b1df33a74be7bdecca840",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 1065210,
+        "symbols": 4705,
+        "trading_dates": 243,
+        "carried_forward_suspension_rows": 1519,
+        "pre_bse_open_universe_rows_excluded": 96,
+        "pre_bse_listing_bar_rows_excluded": 23596,
+        "reviewed_unbounded_limit_rows": 0
+      }
+    },
+    {
+      "artifact_id": "639e2853691ecae2c294",
+      "start_date": "2022-01-01",
+      "end_date": "2022-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=639e2853691ecae2c294/tradability.parquet",
+      "parquet_sha256": "5dc794142025f47ad72e8b5adbc215f59099b3d8162dcc75a584efa11b13ccc8",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 1174277,
+        "symbols": 5113,
+        "trading_dates": 242,
+        "carried_forward_suspension_rows": 230,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 7792,
+        "reviewed_unbounded_limit_rows": 1
+      }
+    },
+    {
+      "artifact_id": "2df02e4b8358b30281a1",
+      "start_date": "2023-01-01",
+      "end_date": "2023-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=2df02e4b8358b30281a1/tradability.parquet",
+      "parquet_sha256": "344200d808878d4fe0f55612e300abfc50d69a7e00b5965daf56519e5a014291",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 1260960,
+        "symbols": 5380,
+        "trading_dates": 242,
+        "carried_forward_suspension_rows": 0,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 0,
+        "reviewed_unbounded_limit_rows": 0
+      }
+    },
+    {
+      "artifact_id": "d4211d9a32a0dbfdd083",
+      "start_date": "2024-01-01",
+      "end_date": "2024-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=d4211d9a32a0dbfdd083/tradability.parquet",
+      "parquet_sha256": "804a2db942706b297440a3a6d45997207f65998bd82d94c73d2cc1df1d078621",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 1296723,
+        "symbols": 5435,
+        "trading_dates": 242,
+        "carried_forward_suspension_rows": 0,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 0,
+        "reviewed_unbounded_limit_rows": 0
+      }
+    },
+    {
+      "artifact_id": "0392ccc869892754be1e",
+      "start_date": "2025-01-01",
+      "end_date": "2025-12-31",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=0392ccc869892754be1e/tradability.parquet",
+      "parquet_sha256": "2cc78d490d72feedf57b7418e74faa906c3e3c0ff753882622c3eaf96185326c",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 1317292,
+        "symbols": 5748,
+        "trading_dates": 243,
+        "carried_forward_suspension_rows": 7,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 0,
+        "reviewed_unbounded_limit_rows": 0
+      }
+    },
+    {
+      "artifact_id": "301be8abaca3c3148ca7",
+      "start_date": "2026-01-01",
+      "end_date": "2026-08-14",
+      "implementation_sha256": "205647364dbc2fc5af877e373c5e7a720abbf975d94c348aeae2dfa5d4d8daeb",
+      "parquet_path": "data/curated/tradability/artifact_id=301be8abaca3c3148ca7/tradability.parquet",
+      "parquet_sha256": "72aea1e9da9647f6704e4c4ca8652af5fd4daa5465343273cd1f776ad4387bde",
+      "physical_hash_matches": true,
+      "promotion_passed": true,
+      "hard_failures": {
+        "unexplained_missing_bar_rows": 0,
+        "bar_without_limit_rows": 0,
+        "price_above_up_limit_rows": 0,
+        "price_below_down_limit_rows": 0
+      },
+      "quality": {
+        "rows": 820497,
+        "symbols": 5563,
+        "trading_dates": 149,
+        "carried_forward_suspension_rows": 0,
+        "pre_bse_open_universe_rows_excluded": 0,
+        "pre_bse_listing_bar_rows_excluded": 0,
+        "reviewed_unbounded_limit_rows": 0
+      }
+    }
+  ]
+}
