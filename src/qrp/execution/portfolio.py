@@ -141,6 +141,14 @@ def generate_target_weight_orders(
         0.0 if liquidate_missing else np.nan
     )
     universe = universe.loc[universe["target_weight"].notna()].copy()
+    # The daily P0.5 grid also contains securities that are neither held nor
+    # targeted (including pre-listing and suspended rows without a price).
+    # They cannot create an order and therefore must not contaminate the price
+    # validation applied to genuine target or liquidation intents.
+    requires_positioning = universe["target_weight"].gt(0) | universe[
+        "total_quantity"
+    ].ne(0)
+    universe = universe.loc[requires_positioning].copy()
     invalid_prices = ~np.isfinite(universe["reference_price"]) | (
         universe["reference_price"] <= 0
     )

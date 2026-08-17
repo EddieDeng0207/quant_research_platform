@@ -136,6 +136,12 @@ def test_target_weights_generate_sell_first_orders_with_capacity():
                 "symbol": "000002.SZ",
                 "reference_price": 20.0,
             },
+            {
+                "trade_date": "2024-01-02",
+                "instrument_id": "CN_EQ:000003.SZ",
+                "symbol": "000003.SZ",
+                "reference_price": np.nan,
+            },
         ]
     )
     panel = prices[["trade_date", "instrument_id", "symbol"]].copy()
