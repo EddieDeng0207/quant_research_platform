@@ -254,6 +254,23 @@ def test_cash_only_target_has_valid_nav_accounting():
     assert (result.daily_nav["nav"] == 100_000).all()
 
 
+def test_stale_valuation_is_persisted_but_blocks_promotion():
+    result = run_portfolio_backtest(
+        _targets().head(1),
+        _market(),
+        _capacity(),
+        initial_cash=100_000,
+        scenarios=(ExecutionScenario(name="base_open"),),
+    )
+    result.daily_positions.loc[
+        result.daily_positions.index[0], "stale_sessions"
+    ] = 21
+    quality = backtest_quality_summary(result, BacktestSpec(), ExecutionSpec())
+    assert not quality["promotion_passed"]
+    assert quality["hard_failures"]["stale_valuation_breach_rows"] == 1
+    assert quality["stale_valuation_breach_instruments"] == 1
+
+
 def test_backtest_artifact_is_promoted_and_deterministic():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

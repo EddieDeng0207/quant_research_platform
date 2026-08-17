@@ -205,6 +205,8 @@ def build_backtest_artifact(
             "routine_small_orders_are_audited": True,
             "unfilled_orders_cancelled_and_rebuilt": True,
             "raw_prices_for_execution_and_valuation": True,
+            "stale_last_close_is_diagnostic_only_beyond_frozen_limit": True,
+            "stale_valuation_breach_blocks_promotion": True,
             "cash_dividend_record_ex_pay_separation": True,
             "dividend_receivables_in_nav": True,
             "independent_scenario_ledgers": True,
@@ -311,6 +313,10 @@ def backtest_quality_summary(
     target_sums = target.groupby(["scenario", "trade_date"], observed=True)[
         "target_weight"
     ].sum()
+    stale_sessions = pd.to_numeric(
+        positions.get("stale_sessions", pd.Series(dtype=float)), errors="coerce"
+    )
+    stale_breach = stale_sessions > backtest_spec.max_stale_valuation_sessions
     participation_limits = {
         scenario.name: (
             scenario.max_participation_rate
@@ -350,6 +356,7 @@ def backtest_quality_summary(
                 positions.get("total_quantity", pd.Series(dtype=float)) < 0
             ).sum()
         ),
+        "stale_valuation_breach_rows": int(stale_breach.sum()),
         "target_cash_buffer_breach_rows": int(
             (
                 target_sums
@@ -414,6 +421,14 @@ def backtest_quality_summary(
         "executions": len(executions),
         "suppressed_orders": len(result.suppressed_orders),
         "corporate_action_events": len(result.corporate_action_ledger),
+        "maximum_observed_stale_valuation_sessions": int(
+            stale_sessions.max() if not stale_sessions.empty else 0
+        ),
+        "stale_valuation_breach_instruments": int(
+            positions.loc[stale_breach, "instrument_id"].nunique()
+            if not positions.empty and stale_breach.any()
+            else 0
+        ),
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
     }

@@ -343,7 +343,6 @@ def _run_scenario(
             ledger,
             last_prices,
             stale_sessions,
-            bt_spec.max_stale_valuation_sessions,
         )
         details, account = ledger.mark_to_market(last_prices, trade_date)
         account["dividend_receivable"] = float(sum(dividend_receivables.values()))
@@ -782,7 +781,6 @@ def _refresh_close_prices(
     ledger: PortfolioLedger,
     last_prices: Dict[str, float],
     stale_sessions: Dict[str, int],
-    max_stale: int,
 ) -> None:
     rows = day_market.set_index("instrument_id").to_dict("index")
     for instrument_id, position in ledger.positions.items():
@@ -803,10 +801,10 @@ def _refresh_close_prices(
             stale_sessions[instrument_id] = stale_sessions.get(instrument_id, 0) + 1
             if instrument_id not in last_prices:
                 raise ExecutionError(f"no carry-forward valuation price for {instrument_id}")
-            if stale_sessions[instrument_id] > max_stale:
-                raise ExecutionError(
-                    f"valuation price stale beyond policy for {instrument_id}"
-                )
+            # Continue with the last observable close so the full economic
+            # impact stays measurable. Exceeding the frozen stale limit is evaluated
+            # from the persisted position ledger as a hard promotion failure;
+            # it is not hidden behind an opaque runtime abort.
 
 
 def _portfolio_capacity_row(
