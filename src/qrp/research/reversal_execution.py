@@ -295,8 +295,10 @@ def _quality_summary(
     available = pd.to_datetime(target_capacity["capacity_available_at"], utc=True)
     execution = pd.to_datetime(target_capacity["execution_event_at"], utc=True)
     future_capacity = available.notna() & execution.notna() & (available > execution)
-    observed_targets = target_capacity["has_bar"].fillna(False)
-    complete_targets = target_capacity["capacity_inputs_complete"].fillna(False)
+    observed_targets = target_capacity["has_bar"].astype("boolean").fillna(False)
+    complete_targets = (
+        target_capacity["capacity_inputs_complete"].astype("boolean").fillna(False)
+    )
     hard_failures = {
         "target_weight_sum_breach_dates": int(
             ((target_sums - 0.98).abs() > 1e-9).sum()
