@@ -8,6 +8,7 @@ from qrp.research.price_reversal import (
     _calculate_reversal_variants,
     _decision_schedule,
     _local_time,
+    _market_cap_cny,
     _prepare_forward_returns,
     _resolve_vendor_field,
 )
@@ -97,6 +98,13 @@ def test_forward_returns_are_open_to_open_and_break_on_source_symbol_change():
 def test_reversal_spec_rejects_inconsistent_observation_requirement():
     with pytest.raises(ValueError, match="min_observed_sessions"):
         PriceReversalInputSpec(min_observed_sessions=21).validate()
+    with pytest.raises(ValueError, match="normalized to CNY"):
+        PriceReversalInputSpec(market_value_unit="10k_CNY").validate()
+
+
+def test_market_cap_preserves_lake_normalized_cny_unit():
+    values = pd.Series([31_968_880_000.0])
+    assert _market_cap_cny(values).iloc[0] == 31_968_880_000.0
 
 
 def test_multi_source_alias_field_requires_economically_identical_values():

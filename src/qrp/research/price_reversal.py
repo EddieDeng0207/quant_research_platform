@@ -30,7 +30,8 @@ class PriceReversalInputSpec:
     factor_family: str = "price_volume_close"
     return_convention: str = "close_times_contemporaneous_adj_factor_ratio_v1"
     label_return_convention: str = "open_times_contemporaneous_adj_factor_ratio_v1"
-    version: str = "price_reversal_pit_inputs_v1"
+    market_value_unit: str = "CNY"
+    version: str = "price_reversal_pit_inputs_v2_cny_market_value"
 
     def validate(self) -> "PriceReversalInputSpec":
         if self.window_sessions < 2:
@@ -46,7 +47,9 @@ class PriceReversalInputSpec:
         if len(set(self.horizons)) != len(self.horizons):
             raise ValueError("horizons cannot contain duplicates")
         if self.weekly_rule != "W-FRI":
-            raise ValueError("the v1 pilot freezes weekly decisions to W-FRI")
+            raise ValueError("the reversal pilot freezes weekly decisions to W-FRI")
+        if self.market_value_unit != "CNY":
+            raise ValueError("price-reversal market values must be normalized to CNY")
         return self
 
     @property
@@ -384,7 +387,10 @@ def _prepare_observations(
         output_column="total_mv",
         source_output_column="market_cap_source_symbol",
     )
-    work["market_cap"] = work["total_mv"] * 10_000.0
+    # The Tushare adapter normalizes daily_basic values from 10k CNY to CNY
+    # before they enter the lake.  Multiplying here would silently apply the
+    # vendor unit conversion twice.
+    work["market_cap"] = _market_cap_cny(work["total_mv"])
     work = pd.merge_asof(
         work.sort_values(["trade_date", "instrument_id"]),
         membership.sort_values(["membership_start", "instrument_id"]),
@@ -421,6 +427,11 @@ def _prepare_observations(
         frame["research_as_of_at"] = research_as_of
         result[name] = frame.sort_values(["decision_at", "instrument_id"]).reset_index(drop=True)
     return result
+
+
+def _market_cap_cny(total_mv: pd.Series) -> pd.Series:
+    """Preserve lake-normalized CNY market values without a second unit conversion."""
+    return pd.to_numeric(total_mv, errors="coerce")
 
 
 def _prepare_forward_returns(

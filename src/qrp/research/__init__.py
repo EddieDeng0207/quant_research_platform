@@ -21,6 +21,11 @@ from .price_reversal import (
     PriceReversalInputSpec,
     build_price_reversal_input_artifact,
 )
+from .reversal_execution import (
+    ReversalExecutionInputError,
+    ReversalExecutionInputSpec,
+    build_reversal_execution_input_artifact,
+)
 from .timing import FACTOR_TIMING_CONTRACTS, FactorTimingContract, validate_factor_timing
 
 __all__ = [
@@ -32,9 +37,12 @@ __all__ = [
     "FactorEvaluationSpec",
     "PriceReversalError",
     "PriceReversalInputSpec",
+    "ReversalExecutionInputError",
+    "ReversalExecutionInputSpec",
     "benjamini_hochberg",
     "build_factor_evaluation_artifact",
     "build_price_reversal_input_artifact",
+    "build_reversal_execution_input_artifact",
     "evaluate_single_factor",
     "generate_factor_evaluation_report",
     "register_experiment",

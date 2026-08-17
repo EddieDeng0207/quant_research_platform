@@ -63,8 +63,10 @@ from .execution import (
 from .research import (
     FactorEvaluationSpec,
     PriceReversalInputSpec,
+    ReversalExecutionInputSpec,
     build_factor_evaluation_artifact,
     build_price_reversal_input_artifact,
+    build_reversal_execution_input_artifact,
     generate_factor_evaluation_report,
 )
 
@@ -519,6 +521,22 @@ def _build_parser() -> argparse.ArgumentParser:
     reversal_inputs.add_argument("--data-root", default="data/lake")
     reversal_inputs.add_argument("--output-root", default="data/curated")
 
+    reversal_execution = subparsers.add_parser(
+        "build-reversal-execution-inputs",
+        help="freeze promoted P0.7 targets and lagged P0.6.3 capacity inputs",
+    )
+    reversal_execution.add_argument("--factor-artifact", required=True)
+    reversal_execution.add_argument(
+        "--warmup-tradability-artifact", action="append", required=True
+    )
+    reversal_execution.add_argument("--execution-tradability-artifact", required=True)
+    reversal_execution.add_argument("--research-as-of-at", required=True)
+    reversal_execution.add_argument("--execution-year", type=int, default=2023)
+    reversal_execution.add_argument("--min-periods-20", type=int, default=20)
+    reversal_execution.add_argument("--min-periods-60", type=int, default=60)
+    reversal_execution.add_argument("--data-root", default="data/lake")
+    reversal_execution.add_argument("--output-root", default="data/curated")
+
     factor = subparsers.add_parser(
         "build-factor-evaluation",
         help="build a PIT-safe, neutralized P0.7 single-factor evaluation artifact",
@@ -757,6 +775,26 @@ def main(argv: List[str] = None) -> int:
             ),
         )
         print(f"built price-reversal input artifact -> {output}")
+        return 0
+    if args.command == "build-reversal-execution-inputs":
+        output = build_reversal_execution_input_artifact(
+            factor_artifact=Path(args.factor_artifact),
+            warmup_tradability_artifacts=[
+                Path(value) for value in args.warmup_tradability_artifact
+            ],
+            execution_tradability_artifact=Path(
+                args.execution_tradability_artifact
+            ),
+            lake_root=Path(args.data_root),
+            output_root=Path(args.output_root),
+            research_as_of_at=args.research_as_of_at,
+            spec=ReversalExecutionInputSpec(
+                execution_year=args.execution_year,
+                min_periods_20=args.min_periods_20,
+                min_periods_60=args.min_periods_60,
+            ),
+        )
+        print(f"built reversal execution-input artifact -> {output}")
         return 0
     if args.command == "build-factor-evaluation":
         output = build_factor_evaluation_artifact(
