@@ -433,6 +433,42 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(row["cash_per_share_tax"], 0.1)
         self.assertEqual(row["bonus_share_ratio"], 0.2)
         self.assertEqual(len(row["source_action_id"]), 24)
+        self.assertEqual(result.metadata["exact_vendor_duplicate_rows_excluded"], 0)
+
+    def test_corporate_action_identity_includes_base_share_versions(self):
+        base = {
+            "ts_code": "000564.SZ",
+            "end_date": "20210916",
+            "ann_date": "20210916",
+            "div_proc": "实施",
+            "stk_div": 2.203571,
+            "stk_bo_rate": None,
+            "stk_co_rate": 2.203571,
+            "cash_div": 0.0,
+            "cash_div_tax": 0.0,
+            "record_date": "20211230",
+            "ex_date": "20211231",
+            "pay_date": None,
+            "div_listdate": "20211231",
+            "imp_ann_date": "20211227",
+            "base_date": "20211227",
+        }
+        class VersionedDividendClient(FakeTushareClient):
+            @staticmethod
+            def dividend(**kwargs):
+                return pd.DataFrame(
+                    [
+                        {**base, "base_share": 598200.4024},
+                        {**base, "base_share": 598200.4000},
+                    ]
+                )
+
+        result = TushareProvider(client=VersionedDividendClient()).fetch_corporate_actions(
+            "000564.SZ", "2021-01-01", "2021-12-31"
+        )
+
+        self.assertEqual(len(result.frame), 2)
+        self.assertEqual(result.frame["source_action_id"].nunique(), 2)
 
     def test_endpoint_page_sizes_match_reviewed_maxima(self):
         self.assertEqual(
