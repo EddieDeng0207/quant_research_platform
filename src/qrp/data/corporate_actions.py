@@ -59,7 +59,7 @@ def build_corporate_action_events(
     missing = sorted(required_raw - set(raw_actions.columns))
     if missing:
         raise CorporateActionError(f"raw corporate actions missing columns: {missing}")
-    required_market = {"symbol", "instrument_id", "trade_date"}
+    required_market = {"symbol", "instrument_id", "trade_date", "list_date"}
     missing_market = sorted(required_market - set(tradability.columns))
     if missing_market:
         raise CorporateActionError(
@@ -68,6 +68,9 @@ def build_corporate_action_events(
 
     market = tradability[list(required_market)].copy()
     market["trade_date"] = pd.to_datetime(market["trade_date"]).dt.normalize()
+    market["list_date"] = pd.to_datetime(
+        market["list_date"], errors="coerce"
+    ).dt.normalize()
     if market.duplicated(["symbol", "trade_date"]).any():
         raise CorporateActionError("tradability has duplicate symbol-date identity rows")
     calendar = pd.DatetimeIndex(market["trade_date"].unique()).sort_values()
@@ -90,9 +93,10 @@ def build_corporate_action_events(
     for column in ["cash_per_share_tax", "bonus_share_ratio"]:
         raw[column] = pd.to_numeric(raw[column], errors="coerce")
 
-    implemented = raw.loc[
-        raw["process_status"].fillna("").astype(str).str.contains("实施")
-    ].copy()
+    normalized_status = raw["process_status"].fillna("").astype(str).str.strip()
+    implemented_mask = normalized_status.eq("实施")
+    stopped_mask = normalized_status.eq("停止实施")
+    implemented = raw.loc[implemented_mask].copy()
     implemented["knowledge_date"] = implemented[
         "implementation_announcement_date"
     ].combine_first(implemented["announcement_date"])
@@ -112,14 +116,23 @@ def build_corporate_action_events(
     unknown_instrument_rows = 0
     late_knowledge_rows = 0
     outside_window_rows = 0
+    prelisting_rows = 0
     for row in implemented.to_dict("records"):
         ex_date = row["ex_date"]
         if pd.isna(ex_date):
+            record_date = row["record_date"]
+            if pd.notna(record_date) and record_date < calendar.min():
+                outside_window_rows += 1
+                continue
             invalid_effective_rows += 1
             continue
         ex_session = _covered_session(ex_date, calendar)
         if ex_session is None:
             outside_window_rows += 1
+            continue
+        symbol_market = market.loc[market["symbol"] == row["symbol"]]
+        if not symbol_market.empty and ex_session < symbol_market["list_date"].min():
+            prelisting_rows += 1
             continue
         identity = market.loc[
             (market["symbol"] == row["symbol"])
@@ -155,7 +168,7 @@ def build_corporate_action_events(
             "pay_date": row["pay_date"],
             "source": str(row["source"]),
             "source_ingested_at": row["ingested_at"],
-            "policy_version": "tushare_implemented_dividend_pit_v1",
+            "policy_version": "tushare_implemented_dividend_pit_v2",
         }
         cash = row["cash_per_share_tax"]
         if pd.notna(cash) and float(cash) > 0:
@@ -211,10 +224,10 @@ def build_corporate_action_events(
         "bonus_rows": int((events["action_type"] == "bonus").sum())
         if not events.empty
         else 0,
-        "nonimplementation_rows_excluded": len(raw) - len(raw.loc[
-            raw["process_status"].fillna("").astype(str).str.contains("实施")
-        ]),
+        "nonimplementation_rows_excluded": int((~implemented_mask).sum()),
+        "stopped_implementation_rows_excluded": int(stopped_mask.sum()),
         "outside_backtest_window_rows_excluded": outside_window_rows,
+        "prelisting_action_rows_excluded": prelisting_rows,
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
     }
@@ -295,7 +308,7 @@ def build_corporate_action_artifact(
         "raw_inputs": [
             {"path": str(path), "sha256": _sha256(path)} for path in sorted(paths)
         ],
-        "policy_version": "tushare_implemented_dividend_pit_v1",
+        "policy_version": "tushare_implemented_dividend_pit_v2",
         "implementation_sha256": _sha256(Path(__file__)),
         "query_run": query_run_identity,
     }
@@ -309,12 +322,15 @@ def build_corporate_action_artifact(
     _write_immutable_parquet(events, output, logical_sha)
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p062_corporate_actions_v1",
+        "schema_version": "p062_corporate_actions_v2",
         "identity": identity,
         "quality": quality,
         "output": {"path": str(output), "rows": len(events), "sha256": _sha256(output)},
         "guardrails": {
             "implementation_records_only": True,
+            "implementation_status_requires_exact_match": True,
+            "stopped_implementations_are_excluded": True,
+            "prelisting_actions_are_excluded": True,
             "latest_version_per_symbol_period": True,
             "knowledge_time_precedes_ex_open": True,
             "cash_and_share_legs_are_separate": True,

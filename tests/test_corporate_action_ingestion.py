@@ -91,6 +91,7 @@ def _p05(root: Path) -> Path:
                 "symbol": symbol,
                 "instrument_id": f"CN_EQ:{symbol}",
                 "trade_date": date,
+                "list_date": pd.Timestamp("1991-04-03"),
             }
             for date in dates
             for symbol in ("000001.SZ", "600000.SH")
