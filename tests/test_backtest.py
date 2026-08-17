@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from qrp.backtest import (
     BacktestSpec,
@@ -11,8 +12,12 @@ from qrp.backtest import (
     generate_backtest_report,
     run_portfolio_backtest,
 )
-from qrp.backtest.artifact import backtest_quality_summary
+from qrp.backtest.artifact import (
+    _validate_corporate_action_input,
+    backtest_quality_summary,
+)
 from qrp.execution import ExecutionSpec
+from qrp.execution.daily import ExecutionError
 from qrp.execution.scenarios import ExecutionScenario
 
 
@@ -295,3 +300,40 @@ def test_backtest_artifact_is_promoted_and_deterministic():
         assert manifest["quality"]["promotion_passed"]
         assert manifest["quality"]["hard_failures"]["nav_accounting_tie_failure_rows"] == 0
         assert manifest["artifact_id"] in report.read_text(encoding="utf-8")
+
+
+def test_formal_corporate_action_input_requires_full_query_coverage():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        action_path = root / "corporate_actions.parquet"
+        _actions().to_parquet(action_path, index=False)
+        action_sha = hashlib.sha256(action_path.read_bytes()).hexdigest()
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "artifact_id": "actions-test",
+                    "identity": {
+                        "p05_artifact_id": "p05-test",
+                        "p05_manifest_sha256": "p05-manifest-sha",
+                    },
+                    "quality": {
+                        "promotion_passed": True,
+                        "query_coverage": None,
+                        "hard_failures": {},
+                    },
+                    "output": {"sha256": action_sha},
+                    "guardrails": {
+                        "full_universe_query_coverage_proven": False,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ExecutionError, match="query-coverage proof"):
+            _validate_corporate_action_input(
+                action_path,
+                {"artifact_id": "p05-test"},
+                "p05-manifest-sha",
+                require_full_query_coverage=True,
+            )

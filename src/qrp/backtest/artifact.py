@@ -57,6 +57,16 @@ def build_backtest_artifact(
     targets_file = Path(targets_path)
     actions_file = Path(corporate_actions_path) if corporate_actions_path else None
     positions_file = Path(initial_positions_path) if initial_positions_path else None
+    if require_clean_git and actions_file is None:
+        raise ExecutionError(
+            "formal raw-price backtests require a promoted corporate-action artifact"
+        )
+    corporate_action_identity = _validate_corporate_action_input(
+        actions_file,
+        p05_manifest,
+        _sha256(p05_manifest_path),
+        require_full_query_coverage=require_clean_git,
+    )
     tradability = pd.read_parquet(p05_parquet_path)
     capacity = _read_frame(capacity_file)
     targets = _read_frame(targets_file)
@@ -94,6 +104,7 @@ def build_backtest_artifact(
         "capacity_sha256": _sha256(capacity_file),
         "targets_sha256": _sha256(targets_file),
         "corporate_actions_sha256": _optional_sha(actions_file),
+        "corporate_action_artifact": corporate_action_identity,
         "initial_positions_sha256": _optional_sha(positions_file),
         "initial_cash": float(initial_cash),
         "backtest_spec_sha256": bt_spec.fingerprint,
@@ -213,6 +224,56 @@ def build_backtest_artifact(
             f"P0.6.3 artifact failed promotion at {destination}: {quality['hard_failures']}"
         )
     return destination
+
+
+def _validate_corporate_action_input(
+    actions_file: Optional[Path],
+    p05_manifest: Dict[str, Any],
+    p05_manifest_sha256: str,
+    *,
+    require_full_query_coverage: bool,
+) -> Optional[Dict[str, Any]]:
+    """Bind formal raw-price accounting to its promoted full-universe action proof."""
+    if actions_file is None:
+        return None
+    manifest_path = actions_file.parent / "manifest.json"
+    if not manifest_path.exists():
+        if require_full_query_coverage:
+            raise ExecutionError(
+                "formal corporate actions require a sibling immutable manifest"
+            )
+        return None
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if _sha256(actions_file) != manifest.get("output", {}).get("sha256"):
+        raise ExecutionError("corporate-action Parquet SHA-256 does not match manifest")
+    if not manifest.get("quality", {}).get("promotion_passed", False):
+        raise ExecutionError("corporate-action artifact did not pass promotion")
+    source = manifest.get("identity", {})
+    if (
+        source.get("p05_artifact_id") != p05_manifest.get("artifact_id")
+        or source.get("p05_manifest_sha256") != p05_manifest_sha256
+    ):
+        raise ExecutionError("corporate-action artifact is bound to a different P0.5")
+    if require_full_query_coverage:
+        quality = manifest.get("quality", {})
+        if (
+            not manifest.get("guardrails", {}).get(
+                "full_universe_query_coverage_proven", False
+            )
+            or quality.get("query_coverage") != 1.0
+            or quality.get("hard_failures", {}).get("unqueried_p05_symbols", 0) != 0
+        ):
+            raise ExecutionError(
+                "formal corporate actions lack full P0.5 query-coverage proof"
+            )
+    return {
+        "artifact_id": manifest.get("artifact_id"),
+        "manifest_sha256": _sha256(manifest_path),
+        "query_coverage": manifest.get("quality", {}).get("query_coverage"),
+        "full_universe_query_coverage_proven": manifest.get("guardrails", {}).get(
+            "full_universe_query_coverage_proven", False
+        ),
+    }
 
 
 def backtest_quality_summary(
