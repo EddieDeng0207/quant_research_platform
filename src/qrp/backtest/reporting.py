@@ -20,6 +20,7 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
     if manifest.get("schema_version") not in {
         "p063_portfolio_backtest_v1",
         "p063_portfolio_backtest_v2",
+        "p063_portfolio_backtest_v3_capacity_diagnostics",
     }:
         raise ExecutionError("report input is not a P0.6.3 artifact")
     for name, metadata in manifest["outputs"].items():
@@ -93,6 +94,30 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
             f"{row['total_fees']:,.2f} | {row['total_slippage_cost']:,.2f} | "
             f"{row['total_cash_dividends']:,.2f} | "
             f"{_money(row['capacity_p10'])} | {_money(row['capacity_median'])} |"
+        )
+    if "conditional_positive_capacity_p10" in summary.columns:
+        lines.extend(
+            [
+                "",
+                "## 容量完整性与条件诊断",
+                "",
+                "| 情景 | 观测日 | 严格零容量日 | 正容量日占比 | 条件 P10 | 条件中位数 |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for row in summary.to_dict("records"):
+            lines.append(
+                f"| {row['scenario']} | {int(row['capacity_observation_dates'])} | "
+                f"{int(row['zero_capacity_dates'])} | "
+                f"{_pct(row['positive_capacity_date_rate'])} | "
+                f"{_money(row['conditional_positive_capacity_p10'])} | "
+                f"{_money(row['conditional_positive_capacity_median'])} |"
+            )
+        lines.extend(
+            [
+                "",
+                "严格容量将任一目标证券的必要容量输入缺失记为零，因此它是 fail-closed 下界。条件 P10/中位数仅描述正容量日，不得替代严格值或用于忽略停牌/缺失容量风险。",
+            ]
         )
     if "stale_valuation_bounds" in manifest["outputs"]:
         lines.extend(

@@ -1090,7 +1090,12 @@ def _scenario_summary(
     returns = nav["daily_return"].fillna(0.0)
     cumulative = nav["nav"] / initial_nav
     drawdown = cumulative / cumulative.cummax() - 1.0
-    finite_capacity = capacity["strategy_capacity_aum"].dropna() if not capacity.empty else pd.Series(dtype=float)
+    finite_capacity = (
+        capacity["strategy_capacity_aum"].dropna()
+        if not capacity.empty
+        else pd.Series(dtype=float)
+    )
+    positive_capacity = finite_capacity.loc[finite_capacity.gt(0)]
     annualized_return = (
         (ending_nav / initial_nav) ** (252.0 / len(nav)) - 1.0
         if initial_nav > 0 and ending_nav > 0 and len(nav) > 0
@@ -1197,6 +1202,24 @@ def _scenario_summary(
         "capacity_p25": float(finite_capacity.quantile(0.25)) if not finite_capacity.empty else np.nan,
         "capacity_median": float(finite_capacity.median()) if not finite_capacity.empty else np.nan,
         "capacity_min": float(finite_capacity.min()) if not finite_capacity.empty else np.nan,
+        "capacity_observation_dates": int(len(finite_capacity)),
+        "zero_capacity_dates": int(finite_capacity.eq(0).sum()),
+        "positive_capacity_dates": int(len(positive_capacity)),
+        "positive_capacity_date_rate": (
+            float(len(positive_capacity) / len(finite_capacity))
+            if len(finite_capacity)
+            else np.nan
+        ),
+        "conditional_positive_capacity_p10": (
+            float(positive_capacity.quantile(0.10))
+            if not positive_capacity.empty
+            else np.nan
+        ),
+        "conditional_positive_capacity_median": (
+            float(positive_capacity.median())
+            if not positive_capacity.empty
+            else np.nan
+        ),
     }
 
 

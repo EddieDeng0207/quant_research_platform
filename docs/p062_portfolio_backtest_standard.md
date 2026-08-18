@@ -52,6 +52,18 @@ bound_width_pp = stale_market_value_at_last_close / nav_at_last_close * 100
 
 目标在当日全部成交或剩余差额低于申报单位后结束，不会将周频/月频目标变成每日恒定权重再平衡。只有出现拒单或部分成交时，未完成目标才延续到后续交易日；已完成证券不会因价格波动被重新纳入追单。当日未成交订单不盲目原样挂到次日；系统从“未完成目标 + 实际持仓 + 新交易日因果价格”重新计算净订单。这避免停牌、涨跌停或部分成交后旧订单与新组合状态冲突。冻结策略名为 `cancel_and_rebuild_from_active_target`。
 
+### P0.7 到 P0.6.3 的通用交接
+
+`build-factor-execution-inputs` 接受任意已晋级 P0.7 v6 因子 artifact，不再与 `rev20` 名称耦合。交接层必须：
+
+- 校验 `target_weights.parquet` 与 manifest 哈希，并确认 P0.7 硬门禁已通过；
+- 从 P0.7 `factor_spec.target_gross_weight` 读取目标总权重，禁止在交接层硬编码 0.98；
+- 校验因子名、决策时刻早于执行时刻、非负有限权重和唯一执行键；
+- 使用前一证券交易日可知的流动性、自由流通市值和复权波动率构造容量面板；
+- 正式 CLI 必须绑定 clean Git commit、tree 和依赖锁；输出仍标注 `investment_conclusion_allowed: false`，直到 P0.6.3 交易账本完成。
+
+历史命令 `build-reversal-execution-inputs` 仅作兼容别名，新研究一律使用通用命令和 `factor_execution_inputs/` 产物命名空间。
+
 ## 公司行为
 
 原始层保留 Tushare `dividend` 接口的预案、股东大会和实施版本。curated 层仅接受状态精确等于 `实施`的记录，`停止实施` 必须排除，不得使用子串包含判断。对同证券、同报告期保留供应商的合法版本链，只去除逐字段完全重复的行，再选出最新实施版本，并将同一供应商行拆成独立的现金与送股事件。
@@ -78,6 +90,8 @@ bound_width_pp = stale_market_value_at_last_close / nav_at_last_close * 100
 - 持仓容量同时受自由流通市值上限和压力退出金额上限约束；
 - 策略容量是订单容量与持仓容量的较小值；
 - 任一必要容量字段缺失时容量归零，不用未来值或横截面均值填补。
+
+报告同时保留两类容量读数：包含零值的严格 P10/中位数是 fail-closed 下界；正容量日条件 P10/中位数只用于诊断“当必要输入完整时的容量尺度”。产物必须一并报告零容量日数和正容量日占比，不得只展示条件分位数来隐藏停牌或容量缺失。
 
 四套情景使用完全独立的账本：`base_open`、`conservative_open`、`delay_one_session`和 `commission_aware_open`。保守情景的 0.5% 参与率和 50% 流动性折扣同时进入成交与容量估算，不会只修改报表标签。
 

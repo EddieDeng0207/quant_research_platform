@@ -366,6 +366,45 @@ def _prepare_observations(
     research_as_of: pd.Timestamp,
     spec: PriceReversalInputSpec,
 ) -> Dict[str, pd.DataFrame]:
+    work = _prepare_market_observation_base(
+        market,
+        decisions,
+        indicators,
+        membership,
+    )
+    common = [
+        "instrument_id",
+        "industry_code",
+        "market_cap",
+        "research_eligible",
+        "market_close_at",
+        "available_at",
+        "decision_at",
+        "execution_at",
+        "listing_sessions",
+    ]
+    result = {}
+    for name in ("rev20", "rev20_skip1"):
+        frame = work[common].copy()
+        frame["factor_value"] = work[name]
+        frame["observed_sessions"] = work[f"{name}_observed_sessions"].astype("Int64")
+        frame["factor_variant"] = name
+        frame["factor_family"] = spec.factor_family
+        frame["formation_return_convention"] = spec.return_convention
+        frame["minimum_listing_sessions"] = spec.min_listing_sessions
+        frame["minimum_observed_sessions"] = spec.min_observed_sessions
+        frame["research_as_of_at"] = research_as_of
+        result[name] = frame.sort_values(["decision_at", "instrument_id"]).reset_index(drop=True)
+    return result
+
+
+def _prepare_market_observation_base(
+    market: pd.DataFrame,
+    decisions: pd.DataFrame,
+    indicators: pd.DataFrame,
+    membership: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach decision clocks, market value and point-in-time industry membership."""
     decision_dates = set(pd.DatetimeIndex(decisions["decision_date"]))
     work = market.loc[market["trade_date"].isin(decision_dates)].copy()
     schedule = decisions.set_index("decision_date")
@@ -403,30 +442,7 @@ def _prepare_observations(
     outside = work["trade_date"] > work["membership_end"]
     work.loc[outside, "industry_code"] = pd.NA
     work["research_eligible"] = work["standard_research_eligible"]
-    common = [
-        "instrument_id",
-        "industry_code",
-        "market_cap",
-        "research_eligible",
-        "market_close_at",
-        "available_at",
-        "decision_at",
-        "execution_at",
-        "listing_sessions",
-    ]
-    result = {}
-    for name in ("rev20", "rev20_skip1"):
-        frame = work[common].copy()
-        frame["factor_value"] = work[name]
-        frame["observed_sessions"] = work[f"{name}_observed_sessions"].astype("Int64")
-        frame["factor_variant"] = name
-        frame["factor_family"] = spec.factor_family
-        frame["formation_return_convention"] = spec.return_convention
-        frame["minimum_listing_sessions"] = spec.min_listing_sessions
-        frame["minimum_observed_sessions"] = spec.min_observed_sessions
-        frame["research_as_of_at"] = research_as_of
-        result[name] = frame.sort_values(["decision_at", "instrument_id"]).reset_index(drop=True)
-    return result
+    return work
 
 
 def _market_cap_cny(total_mv: pd.Series) -> pd.Series:

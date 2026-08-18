@@ -190,7 +190,7 @@ def build_backtest_artifact(
     }
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p063_portfolio_backtest_v2",
+        "schema_version": "p063_portfolio_backtest_v3_capacity_diagnostics",
         "identity": identity,
         "backtest_spec": {**asdict(bt_spec), "sha256": bt_spec.fingerprint},
         "execution_spec": {**asdict(exec_spec), "sha256": exec_spec.fingerprint},

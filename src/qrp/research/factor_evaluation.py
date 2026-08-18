@@ -34,6 +34,8 @@ class FactorEvaluationSpec:
     min_evaluation_periods: int = 104
     min_industry_members: int = 5
     minimum_coverage: float = 0.80
+    eligibility_column: str = "research_eligible"
+    minimum_scope_retention: float = 0.80
     minimum_label_match_rate: float = 0.95
     neutralization_weighting: str = "sqrt_market_cap"
     industry_active_weight_floor: float = 0.05
@@ -44,7 +46,7 @@ class FactorEvaluationSpec:
     annualization_frequency_tolerance: float = 0.15
     minimum_newey_west_lags: int = 1
     return_basis: str = "raw"
-    version: str = "p07_single_factor_evaluation_v5"
+    version: str = "p07_single_factor_evaluation_v6"
 
     def validate(self) -> "FactorEvaluationSpec":
         if not self.factor_name.strip():
@@ -77,6 +79,10 @@ class FactorEvaluationSpec:
             raise ValueError("min_cross_section must be at least min_ic_observations")
         if not 0 < self.minimum_coverage <= 1:
             raise ValueError("minimum_coverage must be in (0, 1]")
+        if self.eligibility_column not in {"research_eligible", "evaluation_eligible"}:
+            raise ValueError("unsupported eligibility_column")
+        if not 0 < self.minimum_scope_retention <= 1:
+            raise ValueError("minimum_scope_retention must be in (0, 1]")
         if not 0 < self.minimum_label_match_rate <= 1:
             raise ValueError("minimum_label_match_rate must be in (0, 1]")
         if self.neutralization_weighting not in {"equal", "sqrt_market_cap"}:
@@ -174,14 +180,30 @@ def _prepare_factor_panel(
         "research_eligible",
         "decision_at",
         "execution_at",
+        spec.eligibility_column,
     }
+    if spec.eligibility_column == "evaluation_eligible":
+        required.update(
+            {
+                "universe_in_scope",
+                "factor_applicable",
+                "scope_exclusion_reason",
+                "research_universe_sha256",
+                "research_universe_minimum_retention",
+            }
+        )
     missing = sorted(required - set(observations.columns))
     if missing:
         raise FactorEvaluationError(f"factor observations missing columns: {missing}")
     work = observations.copy()
     if work.empty:
         raise FactorEvaluationError("factor observations are empty")
-    validate_factor_timing(work, spec.factor_family)
+    numeric_factor = pd.to_numeric(work["factor_value"], errors="coerce")
+    validate_factor_timing(
+        work,
+        spec.factor_family,
+        active_mask=np.isfinite(numeric_factor),
+    )
     work["instrument_id"] = work["instrument_id"].astype(str).str.strip()
     if (work["instrument_id"] == "").any():
         raise FactorEvaluationError("instrument_id cannot be blank")
@@ -201,7 +223,30 @@ def _prepare_factor_panel(
         raise FactorEvaluationError("research_eligible must use a boolean dtype")
     if work["research_eligible"].isna().any():
         raise FactorEvaluationError("research_eligible cannot be null")
-    work["factor_value"] = pd.to_numeric(work["factor_value"], errors="coerce")
+    selected_eligibility = work[spec.eligibility_column]
+    if not (
+        pd.api.types.is_bool_dtype(selected_eligibility.dtype)
+        or str(selected_eligibility.dtype) == "boolean"
+    ):
+        raise FactorEvaluationError(f"{spec.eligibility_column} must use a boolean dtype")
+    if selected_eligibility.isna().any():
+        raise FactorEvaluationError(f"{spec.eligibility_column} cannot be null")
+    if spec.eligibility_column == "evaluation_eligible":
+        invalid_scope = work["evaluation_eligible"] & ~work["research_eligible"]
+        if invalid_scope.any():
+            raise FactorEvaluationError("evaluation_eligible cannot expand P0.5 eligibility")
+        if work["research_universe_sha256"].astype("string").nunique() != 1:
+            raise FactorEvaluationError("evaluation scope must have one frozen universe identity")
+        frozen_retention = pd.to_numeric(
+            work["research_universe_minimum_retention"], errors="coerce"
+        )
+        if frozen_retention.isna().any() or frozen_retention.nunique() != 1:
+            raise FactorEvaluationError("evaluation scope must freeze one retention threshold")
+        if not np.isclose(float(frozen_retention.iloc[0]), spec.minimum_scope_retention):
+            raise FactorEvaluationError(
+                "factor evaluation scope retention disagrees with the frozen universe"
+            )
+    work["factor_value"] = numeric_factor
     work["market_cap"] = pd.to_numeric(work["market_cap"], errors="coerce")
     work["industry_code"] = work["industry_code"].astype("string").str.strip()
     work["decision_date"] = (
@@ -212,7 +257,9 @@ def _prepare_factor_panel(
     coverage_rows: list[Dict[str, Any]] = []
     exposure_rows: list[Dict[str, Any]] = []
     for decision_at, cross_section in work.groupby("decision_at", sort=True, observed=True):
-        eligible = cross_section.loc[cross_section["research_eligible"]].copy()
+        base_eligible = cross_section.loc[cross_section["research_eligible"]].copy()
+        eligible = cross_section.loc[cross_section[spec.eligibility_column]].copy()
+        scope_retention = len(eligible) / len(base_eligible) if len(base_eligible) else 0.0
         finite_factor = np.isfinite(eligible["factor_value"])
         valid_cap = np.isfinite(eligible["market_cap"]) & (eligible["market_cap"] > 0)
         valid_industry = eligible["industry_code"].notna() & (eligible["industry_code"] != "")
@@ -225,7 +272,10 @@ def _prepare_factor_panel(
             "execution_at": cross_section["execution_at"].iloc[0],
             "decision_date": cross_section["decision_date"].iloc[0],
             "universe_rows": len(cross_section),
+            "base_eligible_rows": len(base_eligible),
             "eligible_rows": eligible_count,
+            "scope_excluded_rows": len(base_eligible) - eligible_count,
+            "scope_retention_ratio": scope_retention,
             "usable_rows": usable_count,
             "missing_factor_rows": int((~finite_factor).sum()),
             "invalid_market_cap_rows": int((~valid_cap).sum()),
@@ -841,6 +891,12 @@ def _quality_summary(
         "coverage_below_threshold_dates": int(
             (valid_coverage["coverage_ratio"] < spec.minimum_coverage).sum()
         ),
+        "scope_retention_below_threshold_dates": int(
+            (
+                valid_coverage["scope_retention_ratio"]
+                < spec.minimum_scope_retention
+            ).sum()
+        ),
         "horizon_label_match_rate_below_threshold": int(
             (label_coverage["match_rate"] + 1e-12 < spec.minimum_label_match_rate).sum()
         ),
@@ -876,6 +932,11 @@ def _quality_summary(
         "horizons": sorted(int(value) for value in ic_series["horizon_sessions"].unique()),
         "median_coverage": float(valid_coverage["coverage_ratio"].median()),
         "minimum_coverage_observed": float(valid_coverage["coverage_ratio"].min()),
+        "eligibility_column": spec.eligibility_column,
+        "median_scope_retention": float(valid_coverage["scope_retention_ratio"].median()),
+        "minimum_scope_retention_observed": float(
+            valid_coverage["scope_retention_ratio"].min()
+        ),
         "label_match_rate": label_match_rate,
         "minimum_horizon_label_match_rate": float(label_coverage["match_rate"].min()),
         "structural_tail_label_rows": int(label_coverage["structural_tail_rows"].sum()),
