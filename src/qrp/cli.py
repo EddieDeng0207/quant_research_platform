@@ -63,12 +63,12 @@ from .execution import (
 from .research import (
     RESEARCH_UNIVERSE_PROFILES,
     FactorEvaluationSpec,
+    FactorExecutionInputSpec,
     PriceReversalInputSpec,
-    ReversalExecutionInputSpec,
     SalesToPriceInputSpec,
     build_factor_evaluation_artifact,
+    build_factor_execution_input_artifact,
     build_price_reversal_input_artifact,
-    build_reversal_execution_input_artifact,
     build_sales_to_price_input_artifact,
     generate_factor_evaluation_report,
 )
@@ -552,9 +552,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="allow exploratory output without a clean committed Git identity",
     )
 
+    factor_execution = subparsers.add_parser(
+        "build-factor-execution-inputs",
+        help="freeze any promoted P0.7 factor targets and lagged P0.6.3 capacity inputs",
+    )
+    factor_execution.add_argument("--factor-artifact", required=True)
+    factor_execution.add_argument(
+        "--warmup-tradability-artifact", action="append", required=True
+    )
+    factor_execution.add_argument("--execution-tradability-artifact", required=True)
+    factor_execution.add_argument("--research-as-of-at", required=True)
+    factor_execution.add_argument("--execution-year", type=int, default=2023)
+    factor_execution.add_argument("--min-periods-20", type=int, default=20)
+    factor_execution.add_argument("--min-periods-60", type=int, default=60)
+    factor_execution.add_argument("--data-root", default="data/lake")
+    factor_execution.add_argument("--output-root", default="data/curated")
+    factor_execution.add_argument(
+        "--allow-dirty-code",
+        action="store_true",
+        help="allow exploratory output without a clean committed Git identity",
+    )
+
     reversal_execution = subparsers.add_parser(
         "build-reversal-execution-inputs",
-        help="freeze promoted P0.7 targets and lagged P0.6.3 capacity inputs",
+        help="legacy alias for build-factor-execution-inputs",
     )
     reversal_execution.add_argument("--factor-artifact", required=True)
     reversal_execution.add_argument(
@@ -567,6 +588,7 @@ def _build_parser() -> argparse.ArgumentParser:
     reversal_execution.add_argument("--min-periods-60", type=int, default=60)
     reversal_execution.add_argument("--data-root", default="data/lake")
     reversal_execution.add_argument("--output-root", default="data/curated")
+    reversal_execution.add_argument("--allow-dirty-code", action="store_true")
 
     factor = subparsers.add_parser(
         "build-factor-evaluation",
@@ -835,8 +857,11 @@ def main(argv: List[str] = None) -> int:
         )
         print(f"built sales-to-price input artifact -> {output}")
         return 0
-    if args.command == "build-reversal-execution-inputs":
-        output = build_reversal_execution_input_artifact(
+    if args.command in {
+        "build-factor-execution-inputs",
+        "build-reversal-execution-inputs",
+    }:
+        output = build_factor_execution_input_artifact(
             factor_artifact=Path(args.factor_artifact),
             warmup_tradability_artifacts=[
                 Path(value) for value in args.warmup_tradability_artifact
@@ -847,13 +872,14 @@ def main(argv: List[str] = None) -> int:
             lake_root=Path(args.data_root),
             output_root=Path(args.output_root),
             research_as_of_at=args.research_as_of_at,
-            spec=ReversalExecutionInputSpec(
+            spec=FactorExecutionInputSpec(
                 execution_year=args.execution_year,
                 min_periods_20=args.min_periods_20,
                 min_periods_60=args.min_periods_60,
             ),
+            require_clean_git=not args.allow_dirty_code,
         )
-        print(f"built reversal execution-input artifact -> {output}")
+        print(f"built factor execution-input artifact -> {output}")
         return 0
     if args.command == "build-factor-evaluation":
         output = build_factor_evaluation_artifact(

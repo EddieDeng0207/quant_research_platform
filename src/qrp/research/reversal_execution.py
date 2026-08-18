@@ -1,4 +1,4 @@
-"""Content-addressed P0.7-to-P0.6.3 handoff for the reversal pilot."""
+"""Content-addressed P0.7-to-P0.6.3 handoff for promoted factors."""
 
 from __future__ import annotations
 
@@ -9,9 +9,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Sequence
 
+import numpy as np
 import pandas as pd
 
 from qrp.execution.capacity import build_lagged_capacity_panel
+from qrp.versioning import (
+    VersionControlError,
+    environment_lock_identity,
+    inspect_git_repository,
+)
 
 from .price_reversal import (
     _lake_manifest_entries,
@@ -22,19 +28,19 @@ from .price_reversal import (
 )
 
 
-class ReversalExecutionInputError(RuntimeError):
+class FactorExecutionInputError(RuntimeError):
     """Raised when the P0.7-to-P0.6.3 handoff cannot be proven."""
 
 
 @dataclass(frozen=True)
-class ReversalExecutionInputSpec:
+class FactorExecutionInputSpec:
     execution_year: int = 2023
     min_periods_20: int = 20
     min_periods_60: int = 60
     capacity_policy: str = "lagged_liquidity_volatility_v3"
-    version: str = "rev20_p063_execution_inputs_v1"
+    version: str = "factor_p063_execution_inputs_v2"
 
-    def validate(self) -> "ReversalExecutionInputSpec":
+    def validate(self) -> "FactorExecutionInputSpec":
         if not 1990 <= self.execution_year <= 2100:
             raise ValueError("execution_year is outside the supported range")
         if not 1 <= self.min_periods_20 <= 20:
@@ -50,7 +56,7 @@ class ReversalExecutionInputSpec:
         return _fingerprint(asdict(self))
 
 
-def build_reversal_execution_input_artifact(
+def build_factor_execution_input_artifact(
     *,
     factor_artifact: Path,
     warmup_tradability_artifacts: Sequence[Path],
@@ -58,10 +64,11 @@ def build_reversal_execution_input_artifact(
     lake_root: Path,
     output_root: Path,
     research_as_of_at: str,
-    spec: ReversalExecutionInputSpec | None = None,
+    spec: FactorExecutionInputSpec | None = None,
+    require_clean_git: bool = False,
 ) -> Path:
-    """Build immutable 2023 targets and lagged institutional capacity inputs."""
-    frozen = (spec or ReversalExecutionInputSpec()).validate()
+    """Build immutable factor targets and lagged institutional capacity inputs."""
+    frozen = (spec or FactorExecutionInputSpec()).validate()
     research_as_of = _utc_timestamp(research_as_of_at)
     targets, factor_identity = _load_factor_targets(Path(factor_artifact), frozen)
     market, p05_identities = _load_market_chain(
@@ -69,7 +76,7 @@ def build_reversal_execution_input_artifact(
     )
     execution_identity = p05_identities[-1]
     if int(execution_identity["start_date"][:4]) != frozen.execution_year:
-        raise ReversalExecutionInputError("execution P0.5 artifact does not match execution_year")
+        raise FactorExecutionInputError("execution P0.5 artifact does not match execution_year")
     target_keys = targets[["trade_date", "instrument_id"]]
     market_keys = market[["trade_date", "instrument_id"]]
     missing_target_keys = target_keys.merge(
@@ -79,7 +86,7 @@ def build_reversal_execution_input_artifact(
         indicator=True,
     )
     if (missing_target_keys["_merge"] != "both").any():
-        raise ReversalExecutionInputError("P0.5 market does not cover every P0.7 target key")
+        raise FactorExecutionInputError("P0.5 market does not cover every P0.7 target key")
 
     observed = market.loc[
         market["has_bar"]
@@ -126,7 +133,7 @@ def build_reversal_execution_input_artifact(
         source_output_column="capacity_market_value_source_symbol",
     )
     if observed[["adj_factor", "circ_mv"]].isna().any().any():
-        raise ReversalExecutionInputError(
+        raise FactorExecutionInputError(
             "adjustment factor or CNY free-float market value is missing on observed bars"
         )
     capacity = build_lagged_capacity_panel(
@@ -140,8 +147,23 @@ def build_reversal_execution_input_artifact(
     capacity = capacity.loc[
         capacity["trade_date"].dt.year == frozen.execution_year
     ].reset_index(drop=True)
-    quality = _quality_summary(targets, capacity, market, frozen)
+    quality = _quality_summary(
+        targets,
+        capacity,
+        market,
+        frozen,
+        expected_target_gross_weight=float(factor_identity["target_gross_weight"]),
+    )
     implementation = _implementation_identity()
+    code_identity = None
+    environment_lock = None
+    try:
+        git = inspect_git_repository(Path(__file__), require_clean=require_clean_git)
+        code_identity = git.to_dict()
+        environment_lock = environment_lock_identity(Path(git.repository_root))
+    except VersionControlError:
+        if require_clean_git:
+            raise
     identity = {
         "schema_version": frozen.version,
         "spec_sha256": frozen.fingerprint,
@@ -151,9 +173,17 @@ def build_reversal_execution_input_artifact(
         "daily_indicators": _partition_identity(indicator_entries),
         "research_as_of_at": research_as_of.isoformat(),
         "implementation_sha256": implementation["tree_sha256"],
+        "git_commit": code_identity["commit"] if code_identity else None,
+        "git_tree": code_identity["tree"] if code_identity else None,
+        "git_dirty_state_sha256": (
+            code_identity["dirty_state_sha256"] if code_identity else None
+        ),
+        "environment_lock_sha256": (
+            environment_lock["sha256"] if environment_lock else None
+        ),
     }
     artifact_id = _fingerprint(identity)[:20]
-    destination = Path(output_root) / "reversal_execution_inputs" / f"artifact_id={artifact_id}"
+    destination = Path(output_root) / "factor_execution_inputs" / f"artifact_id={artifact_id}"
     destination.mkdir(parents=True, exist_ok=True)
     outputs = {}
     for name, frame, sort_columns in (
@@ -184,31 +214,57 @@ def build_reversal_execution_input_artifact(
             "volatility_uses_causal_adjusted_close": True,
             "free_float_market_cap_unit": "CNY",
             "suspension_capacity_is_not_imputed": True,
+            "target_gross_weight_read_from_promoted_p07": True,
+            "formal_cli_requires_clean_git": True,
+            "git_commit_bound": code_identity is not None,
+            "environment_lock_bound": environment_lock is not None,
             "investment_conclusion_allowed": False,
         },
         "implementation": implementation,
+        "code_identity": code_identity,
+        "environment_lock": environment_lock,
     }
     _write_immutable_json(manifest, destination / "manifest.json")
     if not quality["promotion_passed"]:
-        raise ReversalExecutionInputError(
-            f"reversal execution inputs failed promotion: {quality['hard_failures']}"
+        raise FactorExecutionInputError(
+            f"factor execution inputs failed promotion: {quality['hard_failures']}"
         )
     return destination
 
 
+# Backward-compatible names for existing rev20 scripts. New research should use
+# the factor-generic API and CLI so the handoff is not coupled to one signal.
+ReversalExecutionInputError = FactorExecutionInputError
+ReversalExecutionInputSpec = FactorExecutionInputSpec
+build_reversal_execution_input_artifact = build_factor_execution_input_artifact
+
+
 def _load_factor_targets(
-    artifact: Path, spec: ReversalExecutionInputSpec
+    artifact: Path, spec: FactorExecutionInputSpec
 ) -> tuple[pd.DataFrame, Dict[str, Any]]:
     manifest_path = artifact / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not manifest.get("quality", {}).get("promotion_passed", False):
-        raise ReversalExecutionInputError("P0.7 factor artifact was not promoted")
+        raise FactorExecutionInputError("P0.7 factor artifact was not promoted")
     metadata = manifest["outputs"]["target_weights"]
     path = artifact / "target_weights.parquet"
     if _sha256(path) != metadata["sha256"]:
-        raise ReversalExecutionInputError("P0.7 target-weight hash mismatch")
+        raise FactorExecutionInputError("P0.7 target-weight hash mismatch")
     targets = pd.read_parquet(path)
+    required = {
+        "execution_at",
+        "decision_at",
+        "instrument_id",
+        "target_weight",
+        "factor_name",
+    }
+    missing = sorted(required - set(targets.columns))
+    if missing:
+        raise FactorExecutionInputError(f"P0.7 targets missing columns: {missing}")
     execution = pd.to_datetime(targets["execution_at"], utc=True)
+    decision = pd.to_datetime(targets["decision_at"], utc=True)
+    if execution.isna().any() or decision.isna().any() or (decision >= execution).any():
+        raise FactorExecutionInputError("P0.7 targets violate decision-before-execution timing")
     targets["trade_date"] = (
         execution.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None).dt.normalize()
     )
@@ -217,12 +273,28 @@ def _load_factor_targets(
         ["trade_date", "decision_at", "instrument_id", "target_weight", "factor_name"]
     ].sort_values(["trade_date", "instrument_id"]).reset_index(drop=True)
     if targets.empty:
-        raise ReversalExecutionInputError("P0.7 artifact has no targets in execution_year")
+        raise FactorExecutionInputError("P0.7 artifact has no targets in execution_year")
+    if targets.duplicated(["trade_date", "instrument_id"]).any():
+        raise FactorExecutionInputError("P0.7 targets contain duplicate execution keys")
+    weights = pd.to_numeric(targets["target_weight"], errors="coerce")
+    if (~np.isfinite(weights)).any() or (~weights.ge(0)).any():
+        raise FactorExecutionInputError("P0.7 targets must contain finite nonnegative weights")
+    factor_names = set(targets["factor_name"].astype("string"))
+    expected_factor_name = str(manifest.get("factor_spec", {}).get("factor_name", ""))
+    if factor_names != {expected_factor_name}:
+        raise FactorExecutionInputError("P0.7 target factor identity does not match manifest")
+    target_gross_weight = manifest.get("factor_spec", {}).get("target_gross_weight")
+    if target_gross_weight is None:
+        raise FactorExecutionInputError("P0.7 manifest has no frozen target_gross_weight")
     return targets, {
         "artifact_id": manifest["artifact_id"],
         "manifest_sha256": _sha256(manifest_path),
         "target_weights_sha256": metadata["sha256"],
         "git_commit": manifest["identity"].get("git_commit"),
+        "factor_name": expected_factor_name,
+        "factor_family": manifest.get("factor_spec", {}).get("factor_family"),
+        "factor_spec_sha256": manifest.get("factor_spec", {}).get("sha256"),
+        "target_gross_weight": float(target_gross_weight),
     }
 
 
@@ -250,9 +322,9 @@ def _load_market_chain(
         parquet_path = root / "tradability.parquet"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not manifest.get("quality", {}).get("promotion_passed", False):
-            raise ReversalExecutionInputError(f"P0.5 artifact was not promoted: {root}")
+            raise FactorExecutionInputError(f"P0.5 artifact was not promoted: {root}")
         if _sha256(parquet_path) != manifest["output"]["sha256"]:
-            raise ReversalExecutionInputError(f"P0.5 hash mismatch: {root}")
+            raise FactorExecutionInputError(f"P0.5 hash mismatch: {root}")
         frames.append(pd.read_parquet(parquet_path, columns=columns))
         identities.append(
             {
@@ -268,7 +340,7 @@ def _load_market_chain(
     for column in ("close", "volume", "amount"):
         market[column] = pd.to_numeric(market[column], errors="coerce")
     if market.duplicated(["instrument_id", "trade_date"]).any():
-        raise ReversalExecutionInputError("P0.5 capacity chain has duplicate keys")
+        raise FactorExecutionInputError("P0.5 capacity chain has duplicate keys")
     return market, identities
 
 
@@ -276,7 +348,9 @@ def _quality_summary(
     targets: pd.DataFrame,
     capacity: pd.DataFrame,
     market: pd.DataFrame,
-    spec: ReversalExecutionInputSpec,
+    spec: FactorExecutionInputSpec,
+    *,
+    expected_target_gross_weight: float = 0.98,
 ) -> Dict[str, Any]:
     target_sums = targets.groupby("trade_date", observed=True)["target_weight"].sum()
     execution_market = market.loc[market["trade_date"].dt.year == spec.execution_year]
@@ -301,7 +375,7 @@ def _quality_summary(
     )
     hard_failures = {
         "target_weight_sum_breach_dates": int(
-            ((target_sums - 0.98).abs() > 1e-9).sum()
+            ((target_sums - expected_target_gross_weight).abs() > 1e-9).sum()
         ),
         "target_market_key_missing_rows": int(target_capacity["has_bar"].isna().sum()),
         "incomplete_capacity_on_observed_target_rows": int(
@@ -315,6 +389,7 @@ def _quality_summary(
         "unique_target_instruments": int(targets["instrument_id"].nunique()),
         "target_weight_sum_min": float(target_sums.min()),
         "target_weight_sum_max": float(target_sums.max()),
+        "expected_target_gross_weight": float(expected_target_gross_weight),
         "capacity_rows": len(capacity),
         "complete_capacity_rows": int(capacity["capacity_inputs_complete"].sum()),
         "observed_target_rows": int(observed_targets.sum()),
@@ -369,7 +444,7 @@ def _write_immutable_parquet(
 ) -> None:
     if path.exists():
         if _frame_fingerprint(pd.read_parquet(path), sort_columns) != logical_sha:
-            raise ReversalExecutionInputError(f"immutable execution-input conflict: {path}")
+            raise FactorExecutionInputError(f"immutable execution-input conflict: {path}")
         return
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     frame.sort_values(list(sort_columns)).to_parquet(temporary, index=False)
@@ -379,7 +454,7 @@ def _write_immutable_parquet(
 def _write_immutable_json(payload: Dict[str, Any], path: Path) -> None:
     encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if path.exists() and path.read_text(encoding="utf-8") != encoded:
-        raise ReversalExecutionInputError(f"immutable execution-input manifest conflict: {path}")
+        raise FactorExecutionInputError(f"immutable execution-input manifest conflict: {path}")
     if not path.exists():
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         temporary.write_text(encoded, encoding="utf-8")

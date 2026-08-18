@@ -311,6 +311,19 @@ HAC 统计、Top/Bottom 真实组合暴露、换手和年度稳定性评测；�
 
 2016–2026 正式 SP P0.7 评测已绑定 clean Git 提交和输入哈希，529 个周频决策期通过全部数据/工程门禁。报告见 `docs/research/sp_ttm_factor_evaluation_2016_2026.md`。P0.7 通过只证明评测可用；目标权重尚未经 P0.6.3 成交、容量和成本回测，因此不构成净投资结论。
 
+已晋级因子通过通用交接命令进入 P0.6.3：
+
+```bash
+.venv/bin/qrp-data build-factor-execution-inputs \
+  --factor-artifact data/curated/factor_evaluations/artifact_id=<P07_ID> \
+  --warmup-tradability-artifact data/curated/tradability/artifact_id=<WARMUP_P05_ID> \
+  --execution-tradability-artifact data/curated/tradability/artifact_id=<EXECUTION_P05_ID> \
+  --execution-year 2023 \
+  --research-as-of-at 2026-08-17T08:00:00Z
+```
+
+该层从 P0.7 manifest 读取因子身份和目标总权重，校验决策/执行时钟，并生成滞后流动性、波动率和自由流通市值容量面板。
+
 ## 当前边界
 
 - manifest 已增加进程级文件锁；同一 checkpoint 当前仍只允许一个编排进程写入。未来并行 Agent 共享任务状态前，需要增加 checkpoint 锁或迁移到事务型任务存储。
