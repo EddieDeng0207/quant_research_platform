@@ -174,3 +174,7 @@ quant_research_platform/
 ## 开发与贡献
 
 代码风格、测试、分支、PR 和数据安全要求见 [CONTRIBUTING.md](CONTRIBUTING.md)。每次正式研究变更都应说明冻结输入、artifact 身份、晋级门禁、经济解释和已知边界。
+
+## 许可证与安全
+
+项目代码采用 [MIT License](LICENSE)。许可证只覆盖本仓库中的代码与文档，不改变第三方数据供应商、交易所公告或其他外部内容各自的授权条件。安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub 私密漏洞报告渠道，不要在公开 Issue 中粘贴密钥、账户数据或授权原始数据。
