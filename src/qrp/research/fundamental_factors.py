@@ -21,7 +21,6 @@ from .factor_universe import CN_A_FULL, ResearchUniverseSpec, attach_research_un
 from .price_reversal import (
     PriceReversalInputSpec,
     _attach_causal_prices,
-    _decision_schedule,
     _fingerprint,
     _frame_fingerprint,
     _lake_manifest_entries,
@@ -54,7 +53,7 @@ class SalesToPriceInputSpec:
     horizons: tuple[int, ...] = (5, 10, 20, 60)
     weekly_rule: str = "W-FRI"
     market_value_unit: str = "CNY"
-    version: str = "sp_ttm_pit_inputs_v1"
+    version: str = "sp_ttm_pit_inputs_v2_actual_listing_calendar"
 
     def validate(self) -> "SalesToPriceInputSpec":
         if self.revenue_column != "revenue":
@@ -111,12 +110,23 @@ def build_sales_to_price_input_artifact(
         horizons=frozen.horizons,
         weekly_rule=frozen.weekly_rule,
     )
-    decisions = _decision_schedule(sessions, schedule_spec)
+    decisions = _fundamental_decision_schedule(
+        sessions,
+        frozen.horizons,
+        frozen.weekly_rule,
+    )
     if decisions.empty:
         raise FundamentalFactorError("no weekly decisions have complete outcome windows")
 
     lake = Path(lake_root)
     lake_entries = _lake_manifest_entries(lake)
+    trading_calendar, calendar_identity = _load_research_calendar(
+        lake,
+        lake_entries,
+        start,
+        end,
+        research_as_of,
+    )
     adjustments, adjustment_entries = _load_latest_partitions(
         lake,
         lake_entries,
@@ -139,8 +149,9 @@ def build_sales_to_price_input_artifact(
     resets, alias_identity = _load_business_resets(Path(aliases_path))
 
     market = _attach_causal_prices(market, adjustments)
-    market["listing_sessions"] = (
-        market.groupby("instrument_id", sort=False, observed=True).cumcount() + 1
+    market["listing_sessions"] = _listing_sessions_since_actual_list_date(
+        market,
+        trading_calendar,
     )
     base = _prepare_market_observation_base(market, decisions, indicators, membership)
     snapshots = build_pit_ttm_revenue_snapshots(
@@ -184,6 +195,7 @@ def build_sales_to_price_input_artifact(
         "aliases": alias_identity,
         "adjustment_factors": _partition_identity(adjustment_entries),
         "daily_indicators": _partition_identity(indicator_entries),
+        "trading_calendar": calendar_identity,
         "implementation_sha256": implementation["tree_sha256"],
         "git_commit": code_identity["commit"] if code_identity else None,
         "git_tree": code_identity["tree"] if code_identity else None,
@@ -243,6 +255,8 @@ def build_sales_to_price_input_artifact(
             "business_discontinuities_reset_fundamental_chain": True,
             "decision_date_market_value_in_cny": True,
             "research_eligibility_from_decision_date": True,
+            "listing_age_uses_actual_list_date_and_frozen_calendar": True,
+            "fundamental_schedule_has_no_price_formation_warmup": True,
             "base_eligibility_preserved_separately_from_factor_scope": True,
             "research_universe_frozen_before_outcome_labels": True,
             "execution_constraints_not_backfilled_into_factor": True,
@@ -312,6 +326,125 @@ def build_pit_ttm_revenue_snapshots(
     if not rows:
         raise FundamentalFactorError("no PIT income snapshots were available at decisions")
     return pd.DataFrame(rows).sort_values(["decision_at", "instrument_id"]).reset_index(drop=True)
+
+
+def _fundamental_decision_schedule(
+    sessions: pd.DatetimeIndex,
+    horizons: Sequence[int],
+    weekly_rule: str,
+) -> pd.DataFrame:
+    """Weekly decisions need complete outcomes but no price-formation warm-up."""
+    if len(sessions) <= max(horizons) + 1:
+        return pd.DataFrame(columns=["decision_date", "execution_date"])
+    position = {date: index for index, date in enumerate(sessions)}
+    weekly = (
+        pd.Series(sessions, index=sessions)
+        .groupby(sessions.to_period(weekly_rule))
+        .max()
+        .sort_values()
+    )
+    rows = []
+    for decision_date in weekly:
+        index = position[pd.Timestamp(decision_date)]
+        execution_index = index + 1
+        if execution_index + max(horizons) >= len(sessions):
+            continue
+        rows.append(
+            {
+                "decision_date": pd.Timestamp(decision_date),
+                "execution_date": sessions[execution_index],
+                **{
+                    f"horizon_{horizon}_end_date": sessions[execution_index + horizon]
+                    for horizon in horizons
+                },
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _load_research_calendar(
+    lake_root: Path,
+    entries: Sequence[Dict[str, Any]],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    research_as_of: pd.Timestamp,
+) -> tuple[pd.DataFrame, Dict[str, Any]]:
+    required_start = start - pd.Timedelta(days=400)
+    candidates = sorted(
+        (
+            entry
+            for entry in entries
+            if entry.get("provider") == "tushare"
+            and entry.get("dataset") == "trading_calendar"
+            and _utc_timestamp(entry["written_at"]) <= research_as_of
+        ),
+        key=lambda entry: _utc_timestamp(entry["written_at"]),
+        reverse=True,
+    )
+    for entry in candidates:
+        path = lake_root / entry["path"]
+        if _sha256(path) != entry["sha256"]:
+            raise FundamentalFactorError(f"trading-calendar hash mismatch: {path}")
+        frame = pd.read_parquet(path)
+        required = {"exchange", "calendar_date", "is_open"}
+        if not required.issubset(frame.columns):
+            continue
+        frame["calendar_date"] = pd.to_datetime(
+            frame["calendar_date"], errors="coerce"
+        ).dt.normalize()
+        frame = frame.loc[frame["exchange"].eq("SSE")].copy()
+        if frame.empty or frame["calendar_date"].isna().any():
+            continue
+        if frame["calendar_date"].min() > required_start or frame["calendar_date"].max() < end:
+            continue
+        if frame.duplicated("calendar_date").any():
+            raise FundamentalFactorError("trading calendar has duplicate SSE dates")
+        return frame.sort_values("calendar_date").reset_index(drop=True), {
+            "path": entry["path"],
+            "sha256": entry["sha256"],
+            "written_at": entry["written_at"],
+            "coverage_start": str(frame["calendar_date"].min().date()),
+            "coverage_end": str(frame["calendar_date"].max().date()),
+        }
+    raise FundamentalFactorError(
+        "no verified trading calendar covers listing warm-up and the research window"
+    )
+
+
+def _listing_sessions_since_actual_list_date(
+    market: pd.DataFrame,
+    calendar: pd.DataFrame,
+) -> pd.Series:
+    list_dates = pd.to_datetime(market["list_date"], errors="coerce").dt.normalize()
+    trade_dates = pd.to_datetime(market["trade_date"], errors="coerce").dt.normalize()
+    if list_dates.isna().any() or trade_dates.isna().any():
+        raise FundamentalFactorError("listing-session calculation has invalid dates")
+    if (list_dates > trade_dates).any():
+        raise FundamentalFactorError("list_date cannot be after trade_date")
+    open_dates = pd.DatetimeIndex(
+        calendar.loc[calendar["is_open"].astype(bool), "calendar_date"]
+    ).sort_values()
+    if open_dates.empty:
+        raise FundamentalFactorError("trading calendar has no open sessions")
+    if open_dates.min() > trade_dates.min() - pd.Timedelta(days=365):
+        raise FundamentalFactorError("trading calendar has insufficient listing warm-up")
+    if open_dates.max() < trade_dates.max():
+        raise FundamentalFactorError("trading calendar ends before the market panel")
+    open_values = open_dates.to_numpy(dtype="datetime64[ns]")
+    start_positions = np.searchsorted(
+        open_values,
+        list_dates.to_numpy(dtype="datetime64[ns]"),
+        side="left",
+    )
+    end_positions = np.searchsorted(
+        open_values,
+        trade_dates.to_numpy(dtype="datetime64[ns]"),
+        side="right",
+    )
+    counts = end_positions - start_positions
+    if (counts < 1).any():
+        raise FundamentalFactorError("listed market rows must have at least one trading session")
+    return pd.Series(counts, index=market.index, dtype="int64")
 
 
 def _prepare_income_events(

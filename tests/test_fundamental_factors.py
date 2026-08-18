@@ -3,7 +3,10 @@ import pytest
 
 from qrp.research.factor_registry import DEFAULT_FACTOR_REGISTRY, SP_TTM, FactorDefinition
 from qrp.research.fundamental_factors import (
+    FundamentalFactorError,
     SalesToPriceInputSpec,
+    _fundamental_decision_schedule,
+    _listing_sessions_since_actual_list_date,
     build_pit_ttm_revenue_snapshots,
 )
 
@@ -160,3 +163,54 @@ def test_sp_spec_rejects_formula_and_unit_drift():
         SalesToPriceInputSpec(revenue_column="total_revenue").validate()
     with pytest.raises(ValueError, match="normalized to CNY"):
         SalesToPriceInputSpec(market_value_unit="10k_CNY").validate()
+
+
+def test_fundamental_schedule_uses_first_week_without_price_formation_warmup():
+    sessions = pd.bdate_range("2023-01-02", periods=80)
+
+    result = _fundamental_decision_schedule(sessions, (5, 10, 20, 60), "W-FRI")
+
+    assert result.iloc[0]["decision_date"] == pd.Timestamp("2023-01-06")
+    assert result.iloc[0]["execution_date"] == pd.Timestamp("2023-01-09")
+    last = result.iloc[-1]
+    decision_position = sessions.get_loc(last["decision_date"])
+    assert decision_position + 1 + 60 < len(sessions)
+
+
+def test_listing_sessions_use_actual_list_date_before_research_window():
+    calendar_dates = pd.date_range("2021-01-01", "2023-01-10")
+    calendar = pd.DataFrame(
+        {
+            "calendar_date": calendar_dates,
+            "is_open": calendar_dates.weekday < 5,
+        }
+    )
+    market = pd.DataFrame(
+        {
+            "list_date": [pd.Timestamp("2021-01-04"), pd.Timestamp("2023-01-06")],
+            "trade_date": [pd.Timestamp("2023-01-06"), pd.Timestamp("2023-01-10")],
+        }
+    )
+
+    result = _listing_sessions_since_actual_list_date(market, calendar)
+
+    assert result.iloc[0] > 500
+    assert result.iloc[1] == 3
+
+
+def test_listing_sessions_fail_closed_when_list_date_follows_trade_date():
+    calendar = pd.DataFrame(
+        {
+            "calendar_date": pd.date_range("2021-01-01", "2023-01-10"),
+            "is_open": True,
+        }
+    )
+    market = pd.DataFrame(
+        {
+            "list_date": [pd.Timestamp("2023-01-10")],
+            "trade_date": [pd.Timestamp("2023-01-09")],
+        }
+    )
+
+    with pytest.raises(FundamentalFactorError, match="after trade_date"):
+        _listing_sessions_since_actual_list_date(market, calendar)
