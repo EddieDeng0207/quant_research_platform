@@ -309,7 +309,7 @@ HAC 统计、Top/Bottom 真实组合暴露、换手和年度稳定性评测；�
 营业收入，遇到缺失组件、金融公司专用报表或业务不连续重组时不做填补。基本面决策日不引入量价形成窗口预热；120 个交易日的上市限制使用真实 `list_date` 和冻结交易日历计算。
 完整分类、公式和审计标准见 `docs/factor_research_standard.md`。
 
-2016–2026 正式 SP P0.7 评测已绑定 clean Git 提交和输入哈希，529 个周频决策期通过全部数据/工程门禁。报告见 `docs/research/sp_ttm_factor_evaluation_2016_2026.md`。P0.7 通过只证明评测可用；目标权重尚未经 P0.6.3 成交、容量和成本回测，因此不构成净投资结论。
+2016–2026 正式 SP P0.7 评测已绑定 clean Git 提交和输入哈希，529 个周频决策期通过全部数据/工程门禁。报告见 `docs/research/sp_ttm_factor_evaluation_2016_2026.md`。2023 年 1,000 万元 P0.6.3 成交/容量/成本回测亦已晋级，正式报告见 `docs/research/sp_ttm_p063_2023.md`，与 rev20_skip1 的同口径对照见 `docs/research/sp_vs_rev20_net_economics_2023.md`。
 
 已晋级因子通过通用交接命令进入 P0.6.3：
 
