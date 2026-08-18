@@ -104,6 +104,20 @@ def test_factor_evaluation_is_pit_neutralized_and_promotable():
     }.issubset(result.ic_series.columns)
 
 
+def test_missing_factor_rows_may_lack_event_time_but_finite_rows_may_not():
+    observations, labels = _factor_inputs()
+    missing_index = observations.index[0]
+    observations.loc[missing_index, "factor_value"] = np.nan
+    observations.loc[missing_index, ["announcement_at", "available_at", "ingested_at"]] = pd.NaT
+
+    result = evaluate_single_factor(observations, labels, _spec())
+    assert result.quality["promotion_passed"]
+
+    observations.loc[missing_index, "factor_value"] = 1.0
+    with pytest.raises(FutureDataError, match="timing contract failed"):
+        evaluate_single_factor(observations, labels, _spec())
+
+
 def test_quantile_portfolio_exposure_gate_catches_tail_concentration():
     observations, labels = _factor_inputs(periods=3, securities=240)
     security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)

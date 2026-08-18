@@ -64,9 +64,11 @@ from .research import (
     FactorEvaluationSpec,
     PriceReversalInputSpec,
     ReversalExecutionInputSpec,
+    SalesToPriceInputSpec,
     build_factor_evaluation_artifact,
     build_price_reversal_input_artifact,
     build_reversal_execution_input_artifact,
+    build_sales_to_price_input_artifact,
     generate_factor_evaluation_report,
 )
 
@@ -522,6 +524,28 @@ def _build_parser() -> argparse.ArgumentParser:
     reversal_inputs.add_argument("--data-root", default="data/lake")
     reversal_inputs.add_argument("--output-root", default="data/curated")
 
+    sp_inputs = subparsers.add_parser(
+        "build-sales-to-price-inputs",
+        help="build PIT TTM sales-to-price observations and separate outcome labels",
+    )
+    sp_inputs.add_argument("--fundamentals-artifact", required=True)
+    sp_inputs.add_argument("--tradability-artifact", action="append", required=True)
+    sp_inputs.add_argument("--industry-artifact", required=True)
+    sp_inputs.add_argument("--aliases", default="configs/instrument_aliases.json")
+    sp_inputs.add_argument("--start", required=True)
+    sp_inputs.add_argument("--end", required=True)
+    sp_inputs.add_argument("--research-as-of-at", required=True)
+    sp_inputs.add_argument("--max-report-age-days", type=int, default=550)
+    sp_inputs.add_argument("--min-listing-sessions", type=int, default=120)
+    sp_inputs.add_argument("--horizon", action="append", type=int)
+    sp_inputs.add_argument("--data-root", default="data/lake")
+    sp_inputs.add_argument("--output-root", default="data/curated")
+    sp_inputs.add_argument(
+        "--allow-dirty-code",
+        action="store_true",
+        help="allow exploratory output without a clean committed Git identity",
+    )
+
     reversal_execution = subparsers.add_parser(
         "build-reversal-execution-inputs",
         help="freeze promoted P0.7 targets and lagged P0.6.3 capacity inputs",
@@ -777,6 +801,26 @@ def main(argv: List[str] = None) -> int:
             ),
         )
         print(f"built price-reversal input artifact -> {output}")
+        return 0
+    if args.command == "build-sales-to-price-inputs":
+        output = build_sales_to_price_input_artifact(
+            fundamentals_artifact=Path(args.fundamentals_artifact),
+            tradability_artifacts=[Path(value) for value in args.tradability_artifact],
+            lake_root=Path(args.data_root),
+            industry_artifact=Path(args.industry_artifact),
+            aliases_path=Path(args.aliases),
+            output_root=Path(args.output_root),
+            start_date=args.start,
+            end_date=args.end,
+            research_as_of_at=args.research_as_of_at,
+            spec=SalesToPriceInputSpec(
+                max_report_age_days=args.max_report_age_days,
+                min_listing_sessions=args.min_listing_sessions,
+                horizons=tuple(args.horizon or (5, 10, 20, 60)),
+            ),
+            require_clean_git=not args.allow_dirty_code,
+        )
+        print(f"built sales-to-price input artifact -> {output}")
         return 0
     if args.command == "build-reversal-execution-inputs":
         output = build_reversal_execution_input_artifact(

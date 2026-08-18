@@ -291,11 +291,28 @@ HAC 统计、Top/Bottom 真实组合暴露、换手和年度稳定性评测；�
 冻结样本终点区分结构性尾部与内部缺失，并输出可交给 P0.6.3 的多头目标权重。完整标准见
 `docs/p07_single_factor_evaluation_standard.md`。
 
+因子研究按“原始信号 → 量化选股合成 → 组合与交易”分层。首个基本面原始
+因子 `sp_ttm` 已提供 PIT 输入构建命令：
+
+```bash
+.venv/bin/qrp-data build-sales-to-price-inputs \
+  --fundamentals-artifact data/curated/fundamentals/artifact_id=<P0.8_ID> \
+  --tradability-artifact data/curated/tradability/artifact_id=<P0.5_ID> \
+  --industry-artifact data/curated/industry/artifact_id=<INDUSTRY_ID> \
+  --start 2016-01-01 \
+  --end 2026-08-14 \
+  --research-as-of-at 2026-08-17T08:00:00Z
+```
+
+它逐决策日重放财报修订，使用“本年累计 + 上年全年 − 上年同期”构造 TTM
+营业收入，遇到缺失组件、金融公司专用报表或业务不连续重组时不做填补。
+完整分类、公式和审计标准见 `docs/factor_research_standard.md`。
+
 ## 当前边界
 
 - manifest 已增加进程级文件锁；同一 checkpoint 当前仍只允许一个编排进程写入。未来并行 Agent 共享任务状态前，需要增加 checkpoint 锁或迁移到事务型任务存储。
 - AKShare 股票列表只有当前截面，不能用于历史股票池。
 - Tushare 权限受积分影响；当前全市场任务已实现分页、限流、指数退避和断点续传。
-- 财报 raw 接口已保留公告日、实际公告日和修订行；P0.8 已实现全市场断点任务、下一交易日可用时间、不可变版本索引和决策时点版本选择。正式多年回补尚未执行。
+- 财报 raw 接口已保留公告日、实际公告日和修订行；P0.8 已完成全市场多年回补、下一交易日可用时间、不可变版本索引、决策时点版本选择和历史行业接入。
 - 分析师一致预期必须使用能够提供历史快照/变更时间的数据源后再接入。
 - P0.6.1 已提供真实券商成交校准产物和最小样本门禁，但在导入真实成交回报前，滑点参数仍明确标记为研究假设；日线无法证明盘口排队或集合竞价实际成交。

@@ -16,6 +16,19 @@ from .factor_evaluation import (
     FactorEvaluationSpec,
     evaluate_single_factor,
 )
+from .factor_registry import (
+    DEFAULT_FACTOR_REGISTRY,
+    REV20_SKIP1,
+    SP_TTM,
+    FactorDefinition,
+    FactorRegistry,
+)
+from .fundamental_factors import (
+    FundamentalFactorError,
+    SalesToPriceInputSpec,
+    build_pit_ttm_revenue_snapshots,
+    build_sales_to_price_input_artifact,
+)
 from .price_reversal import (
     PriceReversalError,
     PriceReversalInputSpec,
@@ -35,13 +48,22 @@ __all__ = [
     "FactorEvaluationError",
     "FactorEvaluationResult",
     "FactorEvaluationSpec",
+    "FactorDefinition",
+    "FactorRegistry",
+    "FundamentalFactorError",
     "PriceReversalError",
     "PriceReversalInputSpec",
+    "SalesToPriceInputSpec",
+    "DEFAULT_FACTOR_REGISTRY",
+    "REV20_SKIP1",
+    "SP_TTM",
     "ReversalExecutionInputError",
     "ReversalExecutionInputSpec",
     "benjamini_hochberg",
     "build_factor_evaluation_artifact",
     "build_price_reversal_input_artifact",
+    "build_pit_ttm_revenue_snapshots",
+    "build_sales_to_price_input_artifact",
     "build_reversal_execution_input_artifact",
     "evaluate_single_factor",
     "generate_factor_evaluation_report",

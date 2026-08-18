@@ -53,8 +53,15 @@ def validate_factor_timing(
     family: str,
     *,
     contract: Optional[FactorTimingContract] = None,
+    active_mask: Optional[pd.Series] = None,
 ) -> Dict[str, int]:
-    """Validate historical availability and the separately frozen ingestion vintage."""
+    """Validate timing for rows that can contribute a finite research signal.
+
+    Rows with a missing factor value may legitimately lack an event timestamp (for
+    example, a company without enough PIT statements to construct TTM revenue).
+    Callers must pass that exclusion explicitly; the default remains fail-closed
+    over every row.
+    """
     selected = contract or FACTOR_TIMING_CONTRACTS.get(family)
     if selected is None:
         raise ValueError(f"no factor timing contract registered for {family}")
@@ -71,8 +78,15 @@ def validate_factor_timing(
     missing = sorted(columns - set(frame.columns))
     if missing:
         raise FutureDataError(f"{family} factor observations missing timing fields: {missing}")
+    if active_mask is None:
+        active = pd.Series(True, index=frame.index)
+    else:
+        active = pd.Series(active_mask, index=frame.index).fillna(False).astype(bool)
+    selected_frame = frame.loc[active]
+    if selected_frame.empty:
+        raise FutureDataError(f"{family} factor observations contain no active timing rows")
     parsed = {
-        column: pd.to_datetime(frame[column], utc=True, errors="coerce")
+        column: pd.to_datetime(selected_frame[column], utc=True, errors="coerce")
         for column in columns
     }
     null_rows = pd.concat(parsed, axis=1).isna().any(axis=1)

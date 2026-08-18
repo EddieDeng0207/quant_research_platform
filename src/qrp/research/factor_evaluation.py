@@ -181,7 +181,12 @@ def _prepare_factor_panel(
     work = observations.copy()
     if work.empty:
         raise FactorEvaluationError("factor observations are empty")
-    validate_factor_timing(work, spec.factor_family)
+    numeric_factor = pd.to_numeric(work["factor_value"], errors="coerce")
+    validate_factor_timing(
+        work,
+        spec.factor_family,
+        active_mask=np.isfinite(numeric_factor),
+    )
     work["instrument_id"] = work["instrument_id"].astype(str).str.strip()
     if (work["instrument_id"] == "").any():
         raise FactorEvaluationError("instrument_id cannot be blank")
@@ -201,7 +206,7 @@ def _prepare_factor_panel(
         raise FactorEvaluationError("research_eligible must use a boolean dtype")
     if work["research_eligible"].isna().any():
         raise FactorEvaluationError("research_eligible cannot be null")
-    work["factor_value"] = pd.to_numeric(work["factor_value"], errors="coerce")
+    work["factor_value"] = numeric_factor
     work["market_cap"] = pd.to_numeric(work["market_cap"], errors="coerce")
     work["industry_code"] = work["industry_code"].astype("string").str.strip()
     work["decision_date"] = (
