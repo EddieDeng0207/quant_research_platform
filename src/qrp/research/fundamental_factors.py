@@ -53,7 +53,7 @@ class SalesToPriceInputSpec:
     horizons: tuple[int, ...] = (5, 10, 20, 60)
     weekly_rule: str = "W-FRI"
     market_value_unit: str = "CNY"
-    version: str = "sp_ttm_pit_inputs_v2_actual_listing_calendar"
+    version: str = "sp_ttm_pit_inputs_v3_field_equivalent_versions"
 
     def validate(self) -> "SalesToPriceInputSpec":
         if self.revenue_column != "revenue":
@@ -496,6 +496,15 @@ def _prepare_income_events(
     work["equivalent_source_versions"] = work.groupby(keys, observed=True)[
         "version_id"
     ].transform("size")
+    work["equivalent_version_ids"] = work.groupby(keys, observed=True)[
+        "version_id"
+    ].transform(lambda values: ",".join(sorted(str(value) for value in values)))
+    work["announcement_at"] = work.groupby(keys, observed=True)[
+        "announcement_at"
+    ].transform("max")
+    work["source_ingested_at"] = work.groupby(keys, observed=True)[
+        "source_ingested_at"
+    ].transform("max")
     ambiguous_groups = []
     for key, group in work.groupby(keys, observed=True, sort=False):
         if len(group) == 1:
@@ -505,9 +514,7 @@ def _prepare_income_events(
             revenue.isna().all()
             or (revenue.notna().all() and float(revenue.max() - revenue.min()) == 0.0)
         )
-        same_announcement = group["announcement_at"].nunique(dropna=False) == 1
-        same_ingestion = group["source_ingested_at"].nunique(dropna=False) == 1
-        if not (same_revenue and same_announcement and same_ingestion):
+        if not same_revenue:
             ambiguous_groups.append(key)
     if ambiguous_groups:
         raise FundamentalFactorError(
@@ -540,6 +547,7 @@ def _ttm_from_known_periods(
         "report_age_days": pd.NA,
         "component_report_periods": pd.NA,
         "component_version_ids": pd.NA,
+        "component_equivalent_version_ids": pd.NA,
         "component_source_version_count": pd.NA,
         "announcement_at": pd.NaT,
         "available_at": pd.NaT,
@@ -590,6 +598,9 @@ def _ttm_from_known_periods(
         "ttm_method": method,
         "component_report_periods": "|".join(str(period.date()) for period in component_periods),
         "component_version_ids": "|".join(str(row["version_id"]) for row in components),
+        "component_equivalent_version_ids": "|".join(
+            str(row.get("equivalent_version_ids", row["version_id"])) for row in components
+        ),
         "component_source_version_count": int(
             sum(int(row.get("equivalent_source_versions", 1)) for row in components)
         ),

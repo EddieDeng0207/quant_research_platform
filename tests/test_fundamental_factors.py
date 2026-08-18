@@ -112,6 +112,46 @@ def test_economically_identical_alias_versions_are_collapsed_and_counted():
     assert result.iloc[0]["component_source_version_count"] == 2
 
 
+def test_sp_collapses_field_equivalent_versions_with_conservative_audit_clock():
+    earlier = _income_row("2022-12-31", 100.0, "2023-05-02 01:30", "earlier")
+    later = _income_row("2022-12-31", 100.0, "2023-05-02 01:30", "later")
+    earlier["announcement_at"] = pd.Timestamp("2023-04-28 08:00", tz="UTC")
+    later["announcement_at"] = pd.Timestamp("2023-05-01 08:00", tz="UTC")
+    later["source_ingested_at"] = pd.Timestamp("2026-08-17", tz="UTC")
+
+    result = build_pit_ttm_revenue_snapshots(
+        pd.DataFrame([earlier, later]),
+        _decisions("2023-05-05"),
+        "2026-08-18T00:00:00Z",
+    )
+
+    assert result.iloc[0]["ttm_revenue"] == pytest.approx(100.0)
+    assert result.iloc[0]["component_source_version_count"] == 2
+    assert result.iloc[0]["component_equivalent_version_ids"] == "earlier,later"
+    assert result.iloc[0]["announcement_at"] == pd.Timestamp(
+        "2023-05-01 08:00", tz="UTC"
+    )
+    assert result.iloc[0]["source_ingested_at"] == pd.Timestamp(
+        "2026-08-17", tz="UTC"
+    )
+
+
+def test_sp_rejects_versions_with_different_revenue_at_same_availability():
+    income = pd.DataFrame(
+        [
+            _income_row("2022-12-31", 100.0, "2023-05-02 01:30", "version_a"),
+            _income_row("2022-12-31", 101.0, "2023-05-02 01:30", "version_b"),
+        ]
+    )
+
+    with pytest.raises(FundamentalFactorError, match="economically ambiguous"):
+        build_pit_ttm_revenue_snapshots(
+            income,
+            _decisions("2023-05-05"),
+            "2026-08-18T00:00:00Z",
+        )
+
+
 def test_business_discontinuity_prevents_cross_regime_ttm_stitching():
     instrument = "CN_EQ:RESET"
     income = pd.DataFrame(
