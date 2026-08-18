@@ -299,6 +299,7 @@ HAC 统计、Top/Bottom 真实组合暴露、换手和年度稳定性评测；�
   --fundamentals-artifact data/curated/fundamentals/artifact_id=<P0.8_ID> \
   --tradability-artifact data/curated/tradability/artifact_id=<P0.5_ID> \
   --industry-artifact data/curated/industry/artifact_id=<INDUSTRY_ID> \
+  --research-universe cn_a_sw_l1_core \
   --start 2016-01-01 \
   --end 2026-08-14 \
   --research-as-of-at 2026-08-17T08:00:00Z

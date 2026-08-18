@@ -118,6 +118,37 @@ def test_missing_factor_rows_may_lack_event_time_but_finite_rows_may_not():
         evaluate_single_factor(observations, labels, _spec())
 
 
+def test_declared_scope_has_separate_retention_and_factor_coverage_gates():
+    observations, labels = _factor_inputs()
+    security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)
+    observations["evaluation_eligible"] = security_number % 10 < 8
+    observations["universe_in_scope"] = observations["evaluation_eligible"]
+    observations["factor_applicable"] = True
+    observations["scope_exclusion_reason"] = observations["evaluation_eligible"].map(
+        {True: "", False: "market_segment_out_of_scope"}
+    )
+    observations["research_universe_sha256"] = "frozen-universe"
+    observations["research_universe_minimum_retention"] = 0.80
+    spec = replace(
+        _spec(),
+        eligibility_column="evaluation_eligible",
+        minimum_scope_retention=0.80,
+    )
+
+    result = evaluate_single_factor(observations, labels, spec)
+
+    assert result.quality["promotion_passed"]
+    assert result.quality["median_scope_retention"] == pytest.approx(0.80)
+    assert result.coverage["base_eligible_rows"].eq(30).all()
+    assert result.coverage["eligible_rows"].eq(24).all()
+    assert result.quality["hard_failures"]["scope_retention_below_threshold_dates"] == 0
+
+    observations.loc[security_number % 10 == 7, "evaluation_eligible"] = False
+    failed = evaluate_single_factor(observations, labels, spec)
+    assert not failed.quality["promotion_passed"]
+    assert failed.quality["hard_failures"]["scope_retention_below_threshold_dates"] == 30
+
+
 def test_quantile_portfolio_exposure_gate_catches_tail_concentration():
     observations, labels = _factor_inputs(periods=3, securities=240)
     security_number = observations["instrument_id"].str.removeprefix("CN").astype(int)
@@ -340,7 +371,7 @@ def test_factor_artifact_is_deterministic_and_report_verifies_hashes(tmp_path: P
     )
     assert first == second
     manifest = json.loads((first / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "p07_single_factor_evaluation_v5"
+    assert manifest["schema_version"] == "p07_single_factor_evaluation_v6"
     assert manifest["quality"]["promotion_passed"]
     assert "label_coverage" in manifest["outputs"]
     report = generate_factor_evaluation_report(first, tmp_path / "report.md")

@@ -17,6 +17,7 @@ from qrp.versioning import (
 )
 
 from .factor_registry import SP_TTM
+from .factor_universe import CN_A_FULL, ResearchUniverseSpec, attach_research_universe
 from .price_reversal import (
     PriceReversalInputSpec,
     _attach_causal_prices,
@@ -91,10 +92,12 @@ def build_sales_to_price_input_artifact(
     end_date: str,
     research_as_of_at: str,
     spec: Optional[SalesToPriceInputSpec] = None,
+    universe_spec: Optional[ResearchUniverseSpec] = None,
     require_clean_git: bool = False,
 ) -> Path:
     """Build SP observations and physically separate open-to-open outcome labels."""
     frozen = (spec or SalesToPriceInputSpec()).validate()
+    frozen_universe = (universe_spec or CN_A_FULL).validate()
     start = pd.Timestamp(start_date).normalize()
     end = pd.Timestamp(end_date).normalize()
     if start > end:
@@ -148,6 +151,7 @@ def build_sales_to_price_input_artifact(
         spec=frozen,
     )
     observations = _attach_sales_to_price(base, snapshots, research_as_of, frozen)
+    observations = attach_research_universe(observations, frozen_universe)
     labels = _prepare_forward_returns(
         market,
         {"sp_ttm": observations},
@@ -169,6 +173,7 @@ def build_sales_to_price_input_artifact(
     identity = {
         "schema_version": frozen.version,
         "factor_definition_sha256": SP_TTM.fingerprint,
+        "research_universe_sha256": frozen_universe.fingerprint,
         "start_date": str(start.date()),
         "end_date": str(end.date()),
         "research_as_of_at": research_as_of.isoformat(),
@@ -221,6 +226,10 @@ def build_sales_to_price_input_artifact(
         "identity": identity,
         "factor_definition": {**asdict(SP_TTM), "sha256": SP_TTM.fingerprint},
         "spec": {**asdict(frozen), "sha256": frozen.fingerprint},
+        "research_universe": {
+            **asdict(frozen_universe),
+            "sha256": frozen_universe.fingerprint,
+        },
         "outputs": outputs,
         "quality": quality,
         "guardrails": {
@@ -234,6 +243,8 @@ def build_sales_to_price_input_artifact(
             "business_discontinuities_reset_fundamental_chain": True,
             "decision_date_market_value_in_cny": True,
             "research_eligibility_from_decision_date": True,
+            "base_eligibility_preserved_separately_from_factor_scope": True,
+            "research_universe_frozen_before_outcome_labels": True,
             "execution_constraints_not_backfilled_into_factor": True,
             "future_labels_physically_separated": True,
             "outcome_labels_never_read_during_factor_formation": True,
@@ -392,6 +403,7 @@ def _ttm_from_known_periods(
         "ttm_status": "no_statement_in_business_regime",
         "ttm_method": pd.NA,
         "latest_report_period": pd.NaT,
+        "latest_company_type": pd.NA,
         "report_age_days": pd.NA,
         "component_report_periods": pd.NA,
         "component_version_ids": pd.NA,
@@ -408,6 +420,7 @@ def _ttm_from_known_periods(
     base = {
         **empty,
         "latest_report_period": latest,
+        "latest_company_type": str(known[latest].get("comp_type")),
         "report_age_days": age,
     }
     if age > spec.max_report_age_days:
@@ -480,6 +493,7 @@ def _attach_sales_to_price(
     work["ingested_at"] = work["source_ingested_at"]
     columns = [
         "instrument_id",
+        "symbol",
         "factor_value",
         "industry_code",
         "market_cap",
@@ -496,6 +510,7 @@ def _attach_sales_to_price(
         "ttm_status",
         "ttm_method",
         "latest_report_period",
+        "latest_company_type",
         "report_age_days",
         "component_report_periods",
         "component_version_ids",
@@ -565,7 +580,20 @@ def _quality_summary(
         finite_factor_rows=("finite_factor", "sum"),
     )
     coverage["factor_coverage"] = coverage["finite_factor_rows"] / coverage["eligible_rows"]
+    scope = observations.loc[observations["research_eligible"]].groupby(
+        "decision_at", observed=True
+    ).agg(
+        base_rows=("instrument_id", "size"),
+        universe_rows=("universe_in_scope", "sum"),
+        applicable_rows=("evaluation_eligible", "sum"),
+    )
+    scope["universe_retention"] = scope["universe_rows"] / scope["base_rows"]
+    scope["evaluation_retention"] = scope["applicable_rows"] / scope["base_rows"]
     statuses = snapshots["ttm_status"].value_counts(dropna=False).to_dict()
+    exclusion_reasons = observations.loc[
+        observations["research_eligible"] & ~observations["evaluation_eligible"],
+        "scope_exclusion_reason",
+    ].value_counts(dropna=False)
     return {
         "decision_dates": int(observations["decision_at"].nunique()),
         "observation_rows": len(observations),
@@ -574,6 +602,13 @@ def _quality_summary(
         "missing_factor_rows": int((~finite).sum()),
         "median_decision_coverage": float(coverage["factor_coverage"].median()),
         "minimum_decision_coverage": float(coverage["factor_coverage"].min()),
+        "median_universe_retention": float(scope["universe_retention"].median()),
+        "minimum_universe_retention": float(scope["universe_retention"].min()),
+        "median_evaluation_retention": float(scope["evaluation_retention"].median()),
+        "minimum_evaluation_retention": float(scope["evaluation_retention"].min()),
+        "scope_exclusion_reason_counts": {
+            str(key): int(value) for key, value in exclusion_reasons.items()
+        },
         "ttm_status_counts": {str(key): int(value) for key, value in statuses.items()},
         "business_chain_reset_rows": int(
             snapshots["business_chain_reset_applied"].fillna(False).sum()
@@ -588,6 +623,7 @@ def _implementation_identity() -> Dict[str, Any]:
     files = [
         Path(__file__),
         root / "src/qrp/research/factor_registry.py",
+        root / "src/qrp/research/factor_universe.py",
         root / "src/qrp/research/price_reversal.py",
     ]
     entries = [

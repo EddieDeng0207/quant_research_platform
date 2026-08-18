@@ -61,6 +61,7 @@ from .execution import (
     generate_target_weight_orders,
 )
 from .research import (
+    RESEARCH_UNIVERSE_PROFILES,
     FactorEvaluationSpec,
     PriceReversalInputSpec,
     ReversalExecutionInputSpec,
@@ -536,6 +537,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_inputs.add_argument("--end", required=True)
     sp_inputs.add_argument("--research-as-of-at", required=True)
     sp_inputs.add_argument("--max-report-age-days", type=int, default=550)
+    sp_inputs.add_argument(
+        "--research-universe",
+        choices=tuple(RESEARCH_UNIVERSE_PROFILES),
+        default="cn_a_full",
+    )
     sp_inputs.add_argument("--min-listing-sessions", type=int, default=120)
     sp_inputs.add_argument("--horizon", action="append", type=int)
     sp_inputs.add_argument("--data-root", default="data/lake")
@@ -593,6 +599,12 @@ def _build_parser() -> argparse.ArgumentParser:
     factor.add_argument("--min-evaluation-periods", type=int, default=104)
     factor.add_argument("--min-industry-members", type=int, default=5)
     factor.add_argument("--minimum-coverage", type=float, default=0.80)
+    factor.add_argument(
+        "--eligibility-column",
+        choices=("research_eligible", "evaluation_eligible"),
+        default="research_eligible",
+    )
+    factor.add_argument("--minimum-scope-retention", type=float, default=0.80)
     factor.add_argument("--minimum-label-match-rate", type=float, default=0.95)
     factor.add_argument(
         "--neutralization-weighting",
@@ -818,6 +830,7 @@ def main(argv: List[str] = None) -> int:
                 min_listing_sessions=args.min_listing_sessions,
                 horizons=tuple(args.horizon or (5, 10, 20, 60)),
             ),
+            universe_spec=RESEARCH_UNIVERSE_PROFILES[args.research_universe],
             require_clean_git=not args.allow_dirty_code,
         )
         print(f"built sales-to-price input artifact -> {output}")
@@ -860,6 +873,8 @@ def main(argv: List[str] = None) -> int:
                 min_evaluation_periods=args.min_evaluation_periods,
                 min_industry_members=args.min_industry_members,
                 minimum_coverage=args.minimum_coverage,
+                eligibility_column=args.eligibility_column,
+                minimum_scope_retention=args.minimum_scope_retention,
                 minimum_label_match_rate=args.minimum_label_match_rate,
                 neutralization_weighting=args.neutralization_weighting,
                 target_gross_weight=args.target_gross_weight,

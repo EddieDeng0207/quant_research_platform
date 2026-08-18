@@ -122,6 +122,8 @@ def build_factor_evaluation_artifact(
         "guardrails": {
             "factor_and_outcome_inputs_separated": True,
             "point_in_time_contract_validated": True,
+            "base_p05_eligibility_preserved": True,
+            "declared_scope_retention_gated": True,
             "decision_precedes_execution": True,
             "outcome_starts_no_earlier_than_execution": True,
             "cross_sections_processed_independently": True,
@@ -169,6 +171,7 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         "p07_single_factor_evaluation_v3",
         "p07_single_factor_evaluation_v4",
         "p07_single_factor_evaluation_v5",
+        "p07_single_factor_evaluation_v6",
     }:
         raise FactorEvaluationError("report input is not a P0.7 factor artifact")
     for name, metadata in manifest["outputs"].items():
@@ -204,6 +207,7 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         f"- 分组方法：`{spec.get('quantile_assignment', 'global')}`",
         f"- 市值分层数：`{spec.get('size_strata', '不适用')}`",
         f"- 主报告收益口径：`{spec['return_basis']}`",
+        f"- 评测适用域字段：`{spec.get('eligibility_column', 'research_eligible')}`",
         f"- 参数 SHA-256：`{identity['spec_sha256']}`",
         f"- 观测输入 SHA-256：`{identity['observations_sha256']}`",
         f"- 收益标签 SHA-256：`{identity['forward_returns_sha256']}`",
@@ -216,6 +220,11 @@ def generate_factor_evaluation_report(artifact: Path, output: Path) -> Path:
         f"- 决策日/成功处理日：{quality['decision_dates']}/{quality['prepared_dates']}",
         f"- 有效因子行：{quality['prepared_rows']}",
         f"- 覆盖率中位数/最小值：{_pct(quality['median_coverage'])}/{_pct(quality['minimum_coverage_observed'])}",
+        (
+            "- 相对 P0.5 基础股票池的适用域保留率中位数/最小值："
+            f"{_pct(quality.get('median_scope_retention', 1.0))}/"
+            f"{_pct(quality.get('minimum_scope_retention_observed', 1.0))}"
+        ),
         f"- 非结构性未来收益标签匹配率：{_pct(quality['label_match_rate'])}",
         f"- 结构性样本末端标签行：{quality['structural_tail_label_rows']}",
         f"- 样本内部意外缺失标签行：{quality['unexpected_missing_label_rows']}",
