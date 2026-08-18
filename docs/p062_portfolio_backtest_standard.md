@@ -20,7 +20,7 @@ P0.6.2 将 P0.5 可交易性矩阵与 P0.6.1 执行、费用、容量和会计�
 4. 激活已冻结且 `decision_at < execution_event_at` 的目标权重；
 5. 使用开盘前已知的未复权前收价与当前账本生成净订单；
 6. 依次执行卖单和买单，应用 T+1、涨跌停、停牌、申报单位、现金、容量、滑点和费用约束；
-7. 使用未复权收盘价估值；停牌可携带上一个有效收盘价以完成账本和定量诊断，但超过冻结的最大陈旧交易日数后必须写入质量门禁并阻止晋级；
+7. 使用未复权收盘价估值；停牌可携带上一个有效收盘价以完成交易账本，超过冻结的最大陈旧交易日数后必须同时产生末价上界与零价下界；
 8. 股权登记日收盘冻结现金分红权益数量。
 
 组合净值勾稽为：
@@ -30,6 +30,21 @@ NAV = cash + sum(raw_close * total_quantity) + dividend_receivable
 ```
 
 应收股息只进入 NAV，在付息前不能被当作可用现金买股。
+
+## 长停牌估值上下界
+
+`max_stale_valuation_sessions` 默认仍为 20，未被放宽。对陈旧期超过该上限的正持仓，每个执行情景、每个交易日必须同时输出：
+
+- `stale_at_last_close`：按最后可观察未复权收盘价计量，作为估值上界；
+- `stale_at_zero`：将超限持仓的当日末价市值减记为零，作为保守下界。
+
+两个估值情景共用同一套订单、成交、费用、现金和持仓账本，只是收盘 NAV 的覆盖层，不允许用下界 NAV 反向改变当日或后续订单。区间宽度定义为：
+
+```text
+bound_width_pp = stale_market_value_at_last_close / nav_at_last_close * 100
+```
+
+默认 `max_stale_valuation_nav_bound_pp = 2.0`。两个端点缺一、与持仓账本不勾稽，或任一执行情景、任一日的宽度超过 2 个百分点，均阻止晋级。通过只证明该不确定性已完整上报且有界，不表示两个端点任一是公允价值模型。
 
 ## 目标权重和未成交订单
 
@@ -64,7 +79,7 @@ NAV = cash + sum(raw_close * total_quantity) + dividend_receivable
 - 策略容量是订单容量与持仓容量的较小值；
 - 任一必要容量字段缺失时容量归零，不用未来值或横截面均值填补。
 
-三套情景使用完全独立的账本：`base_open`、`conservative_open`、`delay_one_session`。保守情景的 0.5% 参与率和 50% 流动性折扣同时进入成交与容量估算，不会只修改报表标签。
+四套情景使用完全独立的账本：`base_open`、`conservative_open`、`delay_one_session`和 `commission_aware_open`。保守情景的 0.5% 参与率和 50% 流动性折扣同时进入成交与容量估算，不会只修改报表标签。
 
 ## 不可变产物
 
@@ -72,6 +87,7 @@ NAV = cash + sum(raw_close * total_quantity) + dividend_receivable
 
 - `daily_nav.parquet`；
 - `daily_positions.parquet`；
+- `stale_valuation_bounds.parquet`；
 - `target_weights.parquet`；
 - `orders.parquet`；
 - `executions.parquet`；
@@ -93,7 +109,8 @@ NAV = cash + sum(raw_close * total_quantity) + dividend_receivable
 - 成交超出金额参与率、自由流通盘或压力退出天数；
 - P0.5 未晋级或其 Parquet SHA-256 与 manifest 不一致；
 - 正式公司行为产物与 P0.5 查询域不一致、查询覆盖率小于 100% 或未晋级；
-- 任一持仓使用的最后有效价格陈旧期超过 `max_stale_valuation_sessions`。系统会继续冻结账本以便输出完整证据，但该产物只能用于诊断，不得标记为正式策略结论。
+- 超限陈旧持仓的末价/零价两端点缺失、重复、数值不一致；
+- 任一执行情景、任一交易日的 `bound_width_pp` 超过冻结容忍度。
 
 ## 已知边界
 

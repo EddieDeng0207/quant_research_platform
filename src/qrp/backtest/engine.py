@@ -28,10 +28,11 @@ class BacktestSpec:
     cash_buffer_fraction: float = 0.02
     unfilled_order_policy: str = "cancel_and_rebuild_from_active_target"
     max_stale_valuation_sessions: int = 20
+    max_stale_valuation_nav_bound_pp: float = 2.0
     target_weight_tolerance: float = 1e-6
     terminal_delisting_policy: str = "zero_recovery_at_delist_open_v1"
     fractional_share_policy: str = "floor_zero_value_v1"
-    version: str = "a_share_daily_portfolio_backtest_v2_p063"
+    version: str = "a_share_daily_portfolio_backtest_v3_p063_bounded_stale_valuation"
 
     def validate(self) -> "BacktestSpec":
         if not 0 <= self.cash_buffer_fraction < 1:
@@ -40,6 +41,11 @@ class BacktestSpec:
             raise ValueError("unsupported unfilled order policy")
         if self.max_stale_valuation_sessions < 1:
             raise ValueError("max_stale_valuation_sessions must be positive")
+        if (
+            not np.isfinite(self.max_stale_valuation_nav_bound_pp)
+            or not 0 <= self.max_stale_valuation_nav_bound_pp <= 100
+        ):
+            raise ValueError("max_stale_valuation_nav_bound_pp must be in [0, 100]")
         if self.target_weight_tolerance < 0:
             raise ValueError("target_weight_tolerance must be non-negative")
         if self.terminal_delisting_policy != "zero_recovery_at_delist_open_v1":
@@ -57,6 +63,7 @@ class BacktestSpec:
 class BacktestResult:
     daily_nav: pd.DataFrame
     daily_positions: pd.DataFrame
+    stale_valuation_bounds: pd.DataFrame
     target_weights: pd.DataFrame
     orders: pd.DataFrame
     suppressed_orders: pd.DataFrame
@@ -141,9 +148,16 @@ def run_portfolio_backtest(
         all_actions.append(result["corporate_action_ledger"])
         all_capacity.append(result["capacity_history"])
         summaries.append(result["scenario_summary"])
+    daily_nav = _concat(all_nav)
+    daily_positions = _concat(all_positions)
     return BacktestResult(
-        daily_nav=_concat(all_nav),
-        daily_positions=_concat(all_positions),
+        daily_nav=daily_nav,
+        daily_positions=daily_positions,
+        stale_valuation_bounds=build_stale_valuation_bounds(
+            daily_nav,
+            daily_positions,
+            bt_spec,
+        ),
         target_weights=_concat(all_targets),
         orders=_concat(all_orders),
         suppressed_orders=_concat(all_suppressed),
@@ -152,6 +166,118 @@ def run_portfolio_backtest(
         capacity_history=_concat(all_capacity),
         scenario_summary=pd.DataFrame(summaries),
     )
+
+
+STALE_VALUATION_SCENARIOS = ("stale_at_last_close", "stale_at_zero")
+
+
+def build_stale_valuation_bounds(
+    daily_nav: pd.DataFrame,
+    daily_positions: pd.DataFrame,
+    backtest_spec: BacktestSpec,
+) -> pd.DataFrame:
+    """Build two-sided NAV bounds without changing orders or portfolio accounting."""
+    required_nav = {"scenario", "trade_date", "nav"}
+    missing_nav = sorted(required_nav - set(daily_nav.columns))
+    if missing_nav:
+        raise ExecutionError(f"daily NAV missing stale-bound columns: {missing_nav}")
+    base = daily_nav.loc[:, ["scenario", "trade_date", "nav"]].copy()
+    base["trade_date"] = pd.to_datetime(base["trade_date"], errors="raise").dt.normalize()
+    base["nav"] = pd.to_numeric(base["nav"], errors="coerce")
+    if base.duplicated(["scenario", "trade_date"]).any():
+        raise ExecutionError("daily NAV has duplicate scenario/date rows")
+
+    exposure_columns = [
+        "scenario",
+        "trade_date",
+        "stale_market_value_at_last_close",
+        "stale_position_rows",
+        "stale_instruments",
+    ]
+    if daily_positions.empty:
+        exposure = pd.DataFrame(columns=exposure_columns)
+    else:
+        required_positions = {
+            "scenario",
+            "valuation_date",
+            "instrument_id",
+            "total_quantity",
+            "market_value",
+            "stale_sessions",
+        }
+        missing_positions = sorted(required_positions - set(daily_positions.columns))
+        if missing_positions:
+            raise ExecutionError(
+                f"daily positions missing stale-bound columns: {missing_positions}"
+            )
+        positions = daily_positions.copy()
+        quantity = pd.to_numeric(positions["total_quantity"], errors="coerce")
+        stale_sessions = pd.to_numeric(positions["stale_sessions"], errors="coerce")
+        stale = (quantity > 0) & (
+            stale_sessions > backtest_spec.max_stale_valuation_sessions
+        )
+        breached = positions.loc[stale].copy()
+        if breached.empty:
+            exposure = pd.DataFrame(columns=exposure_columns)
+        else:
+            breached["market_value"] = pd.to_numeric(
+                breached["market_value"], errors="coerce"
+            )
+            invalid_market_value = (
+                ~np.isfinite(breached["market_value"])
+                | (breached["market_value"] < 0)
+            )
+            if invalid_market_value.any():
+                raise ExecutionError(
+                    "stale valuation bound requires finite non-negative market values"
+                )
+            breached["valuation_date"] = pd.to_datetime(
+                breached["valuation_date"], errors="raise"
+            ).dt.normalize()
+            exposure = (
+                breached.groupby(["scenario", "valuation_date"], observed=True)
+                .agg(
+                    stale_market_value_at_last_close=("market_value", "sum"),
+                    stale_position_rows=("instrument_id", "size"),
+                    stale_instruments=("instrument_id", "nunique"),
+                )
+                .reset_index()
+                .rename(columns={"valuation_date": "trade_date"})
+            )
+
+    base = base.merge(
+        exposure,
+        on=["scenario", "trade_date"],
+        how="left",
+        validate="one_to_one",
+    )
+    for column in [
+        "stale_market_value_at_last_close",
+        "stale_position_rows",
+        "stale_instruments",
+    ]:
+        base[column] = pd.to_numeric(base[column], errors="coerce").fillna(0)
+    base["stale_position_rows"] = base["stale_position_rows"].astype(int)
+    base["stale_instruments"] = base["stale_instruments"].astype(int)
+    base["bound_width_amount"] = base["stale_market_value_at_last_close"]
+    base["bound_width_pp"] = np.where(
+        base["nav"] > 0,
+        base["bound_width_amount"] / base["nav"] * 100.0,
+        np.nan,
+    )
+
+    upper = base.copy()
+    upper["valuation_scenario"] = "stale_at_last_close"
+    upper["bounded_nav"] = upper["nav"]
+    upper["stale_market_value_adjustment"] = 0.0
+    lower = base.copy()
+    lower["valuation_scenario"] = "stale_at_zero"
+    lower["bounded_nav"] = lower["nav"] - lower["bound_width_amount"]
+    lower["stale_market_value_adjustment"] = -lower["bound_width_amount"]
+    result = pd.concat([upper, lower], ignore_index=True)
+    return result.drop(columns=["nav"]).sort_values(
+        ["scenario", "trade_date", "valuation_scenario"]
+    ).reset_index(drop=True)
 
 
 def _run_scenario(

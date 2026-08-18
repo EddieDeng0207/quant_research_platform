@@ -16,7 +16,10 @@ from qrp.backtest.artifact import (
     _validate_corporate_action_input,
     backtest_quality_summary,
 )
-from qrp.backtest.engine import _p05_terminal_delisting_actions
+from qrp.backtest.engine import (
+    _p05_terminal_delisting_actions,
+    build_stale_valuation_bounds,
+)
 from qrp.execution import ExecutionSpec
 from qrp.execution.daily import ExecutionError
 from qrp.execution.scenarios import ExecutionScenario
@@ -255,7 +258,7 @@ def test_cash_only_target_has_valid_nav_accounting():
     assert (result.daily_nav["nav"] == 100_000).all()
 
 
-def test_stale_valuation_is_persisted_but_blocks_promotion():
+def test_stale_valuation_is_bounded_and_can_promote_within_tolerance():
     result = run_portfolio_backtest(
         _targets().head(1),
         _market(),
@@ -266,10 +269,58 @@ def test_stale_valuation_is_persisted_but_blocks_promotion():
     result.daily_positions.loc[
         result.daily_positions.index[0], "stale_sessions"
     ] = 21
+    spec = BacktestSpec(max_stale_valuation_nav_bound_pp=60.0)
+    result.stale_valuation_bounds = build_stale_valuation_bounds(
+        result.daily_nav,
+        result.daily_positions,
+        spec,
+    )
+    quality = backtest_quality_summary(result, spec, ExecutionSpec())
+    assert quality["promotion_passed"]
+    assert quality["hard_failures"]["stale_valuation_bound_not_reported"] == 0
+    assert quality["hard_failures"]["stale_valuation_bound_exceeds_tolerance"] == 0
+    assert quality["stale_valuation_breach_rows"] == 1
+    assert quality["stale_valuation_breach_instruments"] == 1
+    assert 0 < quality["stale_valuation_nav_bound_pp"] < 60
+
+
+def test_missing_stale_valuation_endpoint_blocks_promotion():
+    result = run_portfolio_backtest(
+        _targets().head(1),
+        _market(),
+        _capacity(),
+        initial_cash=100_000,
+        scenarios=(ExecutionScenario(name="base_open"),),
+    )
+    result.stale_valuation_bounds = result.stale_valuation_bounds.loc[
+        result.stale_valuation_bounds["valuation_scenario"] != "stale_at_zero"
+    ].copy()
     quality = backtest_quality_summary(result, BacktestSpec(), ExecutionSpec())
     assert not quality["promotion_passed"]
-    assert quality["hard_failures"]["stale_valuation_breach_rows"] == 1
-    assert quality["stale_valuation_breach_instruments"] == 1
+    assert quality["hard_failures"]["stale_valuation_bound_not_reported"] > 0
+
+
+def test_stale_valuation_bound_above_tolerance_blocks_promotion():
+    result = run_portfolio_backtest(
+        _targets().head(1),
+        _market(),
+        _capacity(),
+        initial_cash=100_000,
+        scenarios=(ExecutionScenario(name="base_open"),),
+    )
+    result.daily_positions.loc[
+        result.daily_positions.index[0], "stale_sessions"
+    ] = 21
+    spec = BacktestSpec(max_stale_valuation_nav_bound_pp=2.0)
+    result.stale_valuation_bounds = build_stale_valuation_bounds(
+        result.daily_nav,
+        result.daily_positions,
+        spec,
+    )
+    quality = backtest_quality_summary(result, spec, ExecutionSpec())
+    assert not quality["promotion_passed"]
+    assert quality["hard_failures"]["stale_valuation_bound_not_reported"] == 0
+    assert quality["hard_failures"]["stale_valuation_bound_exceeds_tolerance"] == 1
 
 
 def test_p05_delist_date_creates_zero_recovery_terminal_event():
@@ -329,6 +380,8 @@ def test_backtest_artifact_is_promoted_and_deterministic():
         report = generate_backtest_report(first, root / "report.md")
         assert first == second
         assert manifest["quality"]["promotion_passed"]
+        assert manifest["schema_version"] == "p063_portfolio_backtest_v2"
+        assert manifest["outputs"]["stale_valuation_bounds"]["rows"] > 0
         assert manifest["quality"]["hard_failures"]["nav_accounting_tie_failure_rows"] == 0
         assert manifest["artifact_id"] in report.read_text(encoding="utf-8")
 

@@ -20,7 +20,12 @@ from qrp.versioning import (
     inspect_git_repository,
 )
 
-from .engine import BacktestResult, BacktestSpec, run_portfolio_backtest
+from .engine import (
+    BacktestResult,
+    BacktestSpec,
+    build_stale_valuation_bounds,
+    run_portfolio_backtest,
+)
 
 
 def build_backtest_artifact(
@@ -134,6 +139,7 @@ def build_backtest_artifact(
     frames = {
         "daily_nav": result.daily_nav,
         "daily_positions": result.daily_positions,
+        "stale_valuation_bounds": result.stale_valuation_bounds,
         "target_weights": result.target_weights,
         "orders": result.orders,
         "suppressed_orders": result.suppressed_orders,
@@ -145,6 +151,11 @@ def build_backtest_artifact(
     sort_policies = {
         "daily_nav": ["scenario", "trade_date"],
         "daily_positions": ["scenario", "valuation_date", "instrument_id"],
+        "stale_valuation_bounds": [
+            "scenario",
+            "trade_date",
+            "valuation_scenario",
+        ],
         "target_weights": ["scenario", "trade_date", "instrument_id"],
         "orders": ["scenario", "trade_date", "order_id"],
         "suppressed_orders": ["scenario", "trade_date", "order_id"],
@@ -179,7 +190,7 @@ def build_backtest_artifact(
     }
     manifest = {
         "artifact_id": artifact_id,
-        "schema_version": "p063_portfolio_backtest_v1",
+        "schema_version": "p063_portfolio_backtest_v2",
         "identity": identity,
         "backtest_spec": {**asdict(bt_spec), "sha256": bt_spec.fingerprint},
         "execution_spec": {**asdict(exec_spec), "sha256": exec_spec.fingerprint},
@@ -205,8 +216,11 @@ def build_backtest_artifact(
             "routine_small_orders_are_audited": True,
             "unfilled_orders_cancelled_and_rebuilt": True,
             "raw_prices_for_execution_and_valuation": True,
-            "stale_last_close_is_diagnostic_only_beyond_frozen_limit": True,
-            "stale_valuation_breach_blocks_promotion": True,
+            "stale_valuation_session_limit_remains_frozen": True,
+            "stale_last_close_is_upper_valuation_bound": True,
+            "stale_zero_is_conservative_lower_valuation_bound": True,
+            "stale_valuation_two_sided_bound_required": True,
+            "stale_valuation_bound_tolerance_blocks_promotion": True,
             "p05_delisting_zero_recovery_terminal_writeoff": True,
             "fractional_share_entitlements_use_conservative_floor": True,
             "cash_dividend_record_ex_pay_separation": True,
@@ -318,7 +332,40 @@ def backtest_quality_summary(
     stale_sessions = pd.to_numeric(
         positions.get("stale_sessions", pd.Series(dtype=float)), errors="coerce"
     )
-    stale_breach = stale_sessions > backtest_spec.max_stale_valuation_sessions
+    positive_quantity = pd.to_numeric(
+        positions.get("total_quantity", pd.Series(dtype=float)), errors="coerce"
+    ).gt(0)
+    stale_breach = (
+        stale_sessions > backtest_spec.max_stale_valuation_sessions
+    ) & positive_quantity
+    expected_stale_bounds = build_stale_valuation_bounds(
+        nav,
+        positions,
+        backtest_spec,
+    )
+    stale_bound_not_reported = _stale_valuation_bound_not_reported(
+        result.stale_valuation_bounds,
+        expected_stale_bounds,
+    )
+    stale_bound_width = (
+        expected_stale_bounds.loc[
+            expected_stale_bounds["valuation_scenario"] == "stale_at_last_close"
+        ]
+        .loc[:, ["scenario", "trade_date", "bound_width_pp"]]
+        .copy()
+    )
+    stale_bound_exceeds = int(
+        (
+            pd.to_numeric(stale_bound_width["bound_width_pp"], errors="coerce")
+            > backtest_spec.max_stale_valuation_nav_bound_pp + 1e-12
+        ).sum()
+    )
+    stale_bound_by_scenario = {
+        str(name): float(value)
+        for name, value in stale_bound_width.groupby("scenario", observed=True)[
+            "bound_width_pp"
+        ].max().items()
+    }
     participation_limits = {
         scenario.name: (
             scenario.max_participation_rate
@@ -358,7 +405,8 @@ def backtest_quality_summary(
                 positions.get("total_quantity", pd.Series(dtype=float)) < 0
             ).sum()
         ),
-        "stale_valuation_breach_rows": int(stale_breach.sum()),
+        "stale_valuation_bound_not_reported": stale_bound_not_reported,
+        "stale_valuation_bound_exceeds_tolerance": stale_bound_exceeds,
         "target_cash_buffer_breach_rows": int(
             (
                 target_sums
@@ -465,9 +513,84 @@ def backtest_quality_summary(
             if not positions.empty and stale_breach.any()
             else 0
         ),
+        "stale_valuation_breach_rows": int(stale_breach.sum()),
+        "stale_valuation_nav_bound_pp": float(
+            stale_bound_width["bound_width_pp"].max()
+            if not stale_bound_width.empty
+            else 0.0
+        ),
+        "stale_valuation_base_open_nav_bound_pp": float(
+            stale_bound_by_scenario.get("base_open", 0.0)
+        ),
+        "stale_valuation_nav_bound_pp_by_scenario": stale_bound_by_scenario,
+        "max_stale_valuation_nav_bound_pp": float(
+            backtest_spec.max_stale_valuation_nav_bound_pp
+        ),
         "hard_failures": hard_failures,
         "promotion_passed": all(value == 0 for value in hard_failures.values()),
     }
+
+
+def _stale_valuation_bound_not_reported(
+    actual: pd.DataFrame,
+    expected: pd.DataFrame,
+) -> int:
+    """Count missing, extra, duplicate, or numerically inconsistent bound rows."""
+    keys = ["scenario", "trade_date", "valuation_scenario"]
+    values = [
+        "bounded_nav",
+        "stale_market_value_adjustment",
+        "stale_market_value_at_last_close",
+        "stale_position_rows",
+        "stale_instruments",
+        "bound_width_amount",
+        "bound_width_pp",
+    ]
+    required = set(keys + values)
+    if actual.empty or not required.issubset(actual.columns):
+        return max(1, len(expected))
+
+    observed = actual.loc[:, keys + values].copy()
+    reference = expected.loc[:, keys + values].copy()
+    observed["trade_date"] = pd.to_datetime(
+        observed["trade_date"], errors="coerce"
+    ).dt.normalize()
+    reference["trade_date"] = pd.to_datetime(
+        reference["trade_date"], errors="coerce"
+    ).dt.normalize()
+    duplicate_rows = int(observed.duplicated(keys).sum())
+    observed_unique = observed.drop_duplicates(keys, keep="first")
+    key_audit = reference.loc[:, keys].merge(
+        observed_unique.loc[:, keys],
+        on=keys,
+        how="outer",
+        indicator=True,
+    )
+    missing_or_extra = int(key_audit["_merge"].ne("both").sum())
+    comparison = reference.merge(
+        observed_unique,
+        on=keys,
+        how="inner",
+        suffixes=("_expected", "_actual"),
+        validate="one_to_one",
+    )
+    mismatch = pd.Series(False, index=comparison.index)
+    for column in values:
+        expected_value = pd.to_numeric(
+            comparison[f"{column}_expected"], errors="coerce"
+        )
+        actual_value = pd.to_numeric(
+            comparison[f"{column}_actual"], errors="coerce"
+        )
+        close = np.isclose(
+            expected_value,
+            actual_value,
+            rtol=1e-12,
+            atol=1e-8,
+            equal_nan=False,
+        )
+        mismatch |= ~pd.Series(close, index=comparison.index)
+    return duplicate_rows + missing_or_extra + int(mismatch.sum())
 
 
 def _read_frame(path: Path) -> pd.DataFrame:

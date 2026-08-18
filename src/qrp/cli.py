@@ -480,6 +480,7 @@ def _build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--output-root", default="data/curated")
     backtest.add_argument("--cash-buffer", type=float, default=0.02)
     backtest.add_argument("--max-stale-sessions", type=int, default=20)
+    backtest.add_argument("--max-stale-nav-bound-pp", type=float, default=2.0)
     backtest.add_argument("--commission-bps", type=float, default=3.0)
     backtest.add_argument("--minimum-commission", type=float, default=5.0)
     backtest.add_argument("--max-participation", type=float, default=0.01)
@@ -732,6 +733,7 @@ def main(argv: List[str] = None) -> int:
             backtest_spec=BacktestSpec(
                 cash_buffer_fraction=args.cash_buffer,
                 max_stale_valuation_sessions=args.max_stale_sessions,
+                max_stale_valuation_nav_bound_pp=args.max_stale_nav_bound_pp,
             ),
             execution_spec=ExecutionSpec(
                 max_participation_rate=args.max_participation,

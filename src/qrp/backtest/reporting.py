@@ -17,7 +17,10 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
     if not manifest_path.exists():
         raise ExecutionError(f"backtest manifest not found: {manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != "p063_portfolio_backtest_v1":
+    if manifest.get("schema_version") not in {
+        "p063_portfolio_backtest_v1",
+        "p063_portfolio_backtest_v2",
+    }:
         raise ExecutionError("report input is not a P0.6.3 artifact")
     for name, metadata in manifest["outputs"].items():
         path = Path(metadata["path"])
@@ -70,6 +73,12 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
             f"{quality.get('maximum_observed_stale_valuation_sessions', 0)}/"
             f"{quality.get('stale_valuation_breach_instruments', 0)}"
         ),
+        (
+            "- 长停牌估值界限（base/全情景最坏/冻结容忍度）："
+            f"{quality.get('stale_valuation_base_open_nav_bound_pp', 0):.4f}pp/"
+            f"{quality.get('stale_valuation_nav_bound_pp', 0):.4f}pp/"
+            f"{quality.get('max_stale_valuation_nav_bound_pp', 0):.4f}pp"
+        ),
         "",
         "## 情景结果",
         "",
@@ -85,6 +94,24 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
             f"{row['total_cash_dividends']:,.2f} | "
             f"{_money(row['capacity_p10'])} | {_money(row['capacity_median'])} |"
         )
+    if "stale_valuation_bounds" in manifest["outputs"]:
+        lines.extend(
+            [
+                "",
+                "## 长停牌估值上下界",
+                "",
+                "| 执行情景 | 最大界限宽度 | 容忍度 | 结果 |",
+                "|---|---:|---:|---|",
+            ]
+        )
+        tolerance = quality.get("max_stale_valuation_nav_bound_pp", 0.0)
+        for scenario, width in quality.get(
+            "stale_valuation_nav_bound_pp_by_scenario", {}
+        ).items():
+            result = "通过" if width <= tolerance + 1e-12 else "失败"
+            lines.append(
+                f"| {scenario} | {width:.4f}pp | {tolerance:.4f}pp | {result} |"
+            )
     lines.extend(
         [
             "",
@@ -127,7 +154,8 @@ def generate_backtest_report(artifact: Path, output: Path) -> Path:
             "- 在导入真实券商回报完成校准前，滑点和冲击仍是冻结研究假设。",
             "- 冲击按滞后20日个股波动率与成交额参与率的平方根计算；超过冲击容忍度时缩减成交量，不截断成本。",
             "- 小额订单抑制只作用于常规再平衡，完整退出仍强制保留。",
-            "- 超过冻结上限的停牌估值只按最后可观察收盘价继续记账以量化影响；该情况会阻止晋级，不能据此发布投资结论。",
+            "- 超过冻结上限的正持仓同时报告末价上界与零价下界；两者只是同一交易账本的估值覆盖层，不会改变订单、成交或现金。",
+            "- 上下界缺一或全情景最坏宽度超过冻结容忍度仍会阻止晋级；通过只证明估值不确定性有界，不代表末价或零价是公允价值。",
             "- 持仓跨越 P0.5 退市日时按零回收保守写销；未来接入实际三板回收数据必须生成新版本。",
             "- 中国结算的零碎股按全市场账户排序分配，单账户回测无法还原随机次序；本版本向下取整且不给现金替代，属于保守下界。",
             "- 策略表现与容量应一起阅读；任何单一最优情景不得被单独选择展示。",

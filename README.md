@@ -204,6 +204,7 @@ P0.6.1 默认处理 T+1、沪深/北交所申报数量、方向性涨跌停、�
   --capacity artifacts/pilots/p063_capacity.parquet \
   --targets artifacts/pilots/p063_targets.parquet \
   --corporate-actions data/curated/corporate_actions/artifact_id=<ACTION_ID>/corporate_actions.parquet \
+  --max-stale-nav-bound-pp 2.0 \
   --initial-cash 1000000
 
 .venv/bin/qrp-data report-backtest \
@@ -212,7 +213,8 @@ P0.6.1 默认处理 T+1、沪深/北交所申报数量、方向性涨跌停、�
 ```
 
 P0.6.3 沿用 P0.6.2 的严格事件时钟和组合会计，并加入滞后个股波动率、
-平方根冲击、冲击约束成交量、最低佣金诊断和常规小额订单审计。详细规范见
+平方根冲击、冲击约束成交量、最低佣金诊断、常规小额订单审计，以及超限
+陈旧持仓的末价/零价 NAV 上下界。详细规范见
 `docs/p062_portfolio_backtest_standard.md` 和
 `docs/p063_execution_cost_standard.md`。
 
