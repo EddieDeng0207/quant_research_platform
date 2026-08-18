@@ -15,6 +15,7 @@ from qrp.research.factor_universe import (
         ("600000.SH", "sh_main"),
         ("000001.SZ", "sz_main"),
         ("300001.SZ", "chinext"),
+        ("302132.SZ", "chinext"),
         ("688001.SH", "star"),
         ("920001.BJ", "bse"),
     ],
@@ -62,6 +63,7 @@ def test_full_a_share_profile_keeps_boards_but_preserves_formula_applicability()
     assert result.loc[2, "scope_exclusion_reason"] == ""
 
 
-def test_unknown_security_code_fails_closed():
+@pytest.mark.parametrize("symbol", ["510300.SH", "302999.SZ"])
+def test_unknown_security_code_fails_closed(symbol):
     with pytest.raises(ValueError, match="cannot classify"):
-        classify_market_segment("510300.SH")
+        classify_market_segment(symbol)

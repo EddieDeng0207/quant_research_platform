@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass
 
 import pandas as pd
 
+SPECIAL_CHINEXT_CODES = frozenset({"302132"})
+
 
 @dataclass(frozen=True)
 class ResearchUniverseSpec:
@@ -18,7 +20,7 @@ class ResearchUniverseSpec:
     require_industry_classification: bool
     allowed_company_types: tuple[str, ...]
     minimum_base_universe_retention: float = 0.80
-    version: str = "factor_research_universe_v1"
+    version: str = "factor_research_universe_v2_special_chinext_codes"
 
     def validate(self) -> "ResearchUniverseSpec":
         if not self.name or not self.allowed_market_segments:
@@ -126,7 +128,9 @@ def classify_market_segment(symbol: object) -> str:
         return "bse"
     if exchange == "SH" and code.startswith(("688", "689")):
         return "star"
-    if exchange == "SZ" and code.startswith(("300", "301")):
+    if exchange == "SZ" and (
+        code.startswith(("300", "301")) or code in SPECIAL_CHINEXT_CODES
+    ):
         return "chinext"
     if exchange == "SH" and code.startswith(("600", "601", "603", "605")):
         return "sh_main"
