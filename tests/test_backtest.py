@@ -154,6 +154,11 @@ def test_backtest_clock_preserves_dividend_entitlement_after_sale():
         "strategy_capacity_aum"
     ].median()
     assert median_capacity["conservative_open"] < median_capacity["base_open"]
+    assert (result.scenario_summary["zero_capacity_dates"] == 0).all()
+    assert (result.scenario_summary["positive_capacity_date_rate"] == 1.0).all()
+    assert (
+        result.scenario_summary["conditional_positive_capacity_p10"] > 0
+    ).all()
 
 
 def test_commission_aware_scenario_suppresses_small_routine_trade_but_not_exit():
@@ -380,7 +385,10 @@ def test_backtest_artifact_is_promoted_and_deterministic():
         report = generate_backtest_report(first, root / "report.md")
         assert first == second
         assert manifest["quality"]["promotion_passed"]
-        assert manifest["schema_version"] == "p063_portfolio_backtest_v2"
+        assert (
+            manifest["schema_version"]
+            == "p063_portfolio_backtest_v3_capacity_diagnostics"
+        )
         assert manifest["outputs"]["stale_valuation_bounds"]["rows"] > 0
         assert manifest["quality"]["hard_failures"]["nav_accounting_tie_failure_rows"] == 0
         assert manifest["artifact_id"] in report.read_text(encoding="utf-8")

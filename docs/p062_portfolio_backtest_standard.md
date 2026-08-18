@@ -91,6 +91,8 @@ bound_width_pp = stale_market_value_at_last_close / nav_at_last_close * 100
 - 策略容量是订单容量与持仓容量的较小值；
 - 任一必要容量字段缺失时容量归零，不用未来值或横截面均值填补。
 
+报告同时保留两类容量读数：包含零值的严格 P10/中位数是 fail-closed 下界；正容量日条件 P10/中位数只用于诊断“当必要输入完整时的容量尺度”。产物必须一并报告零容量日数和正容量日占比，不得只展示条件分位数来隐藏停牌或容量缺失。
+
 四套情景使用完全独立的账本：`base_open`、`conservative_open`、`delay_one_session`和 `commission_aware_open`。保守情景的 0.5% 参与率和 50% 流动性折扣同时进入成交与容量估算，不会只修改报表标签。
 
 ## 不可变产物
