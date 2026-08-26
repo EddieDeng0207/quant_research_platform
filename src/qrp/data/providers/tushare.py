@@ -35,6 +35,9 @@ TUSHARE_PAGE_SIZES: Dict[str, int] = {
     "fina_indicator_vip": 9000,
 }
 MAX_PAGINATION_PAGES = 100
+EXPLICIT_EMPTY_PAGE_ENDPOINTS = frozenset(
+    {"income_vip", "balancesheet_vip", "cashflow_vip", "fina_indicator_vip"}
+)
 
 
 def _utc_now() -> pd.Timestamp:
@@ -91,22 +94,34 @@ class TushareProvider:
 
     def _fetch_paginated(
         self, endpoint: str, params: Dict[str, Any]
-    ) -> tuple[pd.DataFrame, Dict[str, int]]:
-        """Fetch every page using the endpoint's reviewed maximum page size."""
+    ) -> tuple[pd.DataFrame, Dict[str, Any]]:
+        """Fetch every page without trusting undocumented server-side caps."""
         if endpoint not in TUSHARE_PAGE_SIZES:
             raise ProviderError(f"No reviewed page-size policy for Tushare {endpoint}")
         page_size = TUSHARE_PAGE_SIZES[endpoint]
         frames = []
+        returned_page_sizes = []
         seen_page_hashes = set()
         requests = 0
-        for page in range(MAX_PAGINATION_PAGES):
-            offset = page * page_size
+        offset = 0
+        for _ in range(MAX_PAGINATION_PAGES):
             part = self._call_endpoint(
                 endpoint, **params, limit=page_size, offset=offset
             )
             requests += 1
             if part is None:
                 raise ProviderError(f"Tushare {endpoint} returned a null response")
+            if part.empty:
+                frame = _concat_provider_pages(frames) if frames else part
+                return frame, {
+                    "page_size": page_size,
+                    "requests": requests,
+                    "pages_with_data": len(frames),
+                    "rows_fetched": len(frame),
+                    "returned_page_sizes": returned_page_sizes,
+                    "termination": "explicit_empty_page",
+                    "offset_advance_policy": "actual_rows_returned",
+                }
             if not part.empty:
                 page_hash = hashlib.sha256(
                     "|".join(map(str, part.columns)).encode("utf-8")
@@ -119,13 +134,22 @@ class TushareProvider:
                     )
                 seen_page_hashes.add(page_hash)
                 frames.append(part)
-            if len(part) < page_size:
+            rows_returned = len(part)
+            returned_page_sizes.append(rows_returned)
+            offset += rows_returned
+            if (
+                rows_returned < page_size
+                and endpoint not in EXPLICIT_EMPTY_PAGE_ENDPOINTS
+            ):
                 frame = _concat_provider_pages(frames) if frames else part
                 return frame, {
                     "page_size": page_size,
                     "requests": requests,
                     "pages_with_data": len(frames),
                     "rows_fetched": len(frame),
+                    "returned_page_sizes": returned_page_sizes,
+                    "termination": "short_page_below_reviewed_request_size",
+                    "offset_advance_policy": "actual_rows_returned",
                 }
         raise ProviderError(
             f"Tushare {endpoint} pagination exceeded {MAX_PAGINATION_PAGES} pages"

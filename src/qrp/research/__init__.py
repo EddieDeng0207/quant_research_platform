@@ -1,5 +1,10 @@
 """Research governance, factor timing and immutable experiment records."""
 
+from .cashflow_factors import (
+    CashFlowToPriceInputSpec,
+    build_cashflow_to_price_input_artifact,
+    build_pit_ttm_operating_cashflow_snapshots,
+)
 from .experiments import (
     ExperimentSpec,
     benjamini_hochberg,
@@ -17,6 +22,7 @@ from .factor_evaluation import (
     evaluate_single_factor,
 )
 from .factor_registry import (
+    CFP_TTM,
     DEFAULT_FACTOR_REGISTRY,
     REV20_SKIP1,
     SP_TTM,
@@ -67,20 +73,24 @@ __all__ = [
     "PriceReversalError",
     "PriceReversalInputSpec",
     "SalesToPriceInputSpec",
+    "CashFlowToPriceInputSpec",
     "DEFAULT_FACTOR_REGISTRY",
     "CN_A_FULL",
     "CN_A_SW_L1_CORE",
     "RESEARCH_UNIVERSE_PROFILES",
     "REV20_SKIP1",
+    "CFP_TTM",
     "SP_TTM",
     "ReversalExecutionInputError",
     "ReversalExecutionInputSpec",
     "benjamini_hochberg",
     "build_factor_evaluation_artifact",
+    "build_cashflow_to_price_input_artifact",
     "build_factor_execution_input_artifact",
     "attach_research_universe",
     "build_price_reversal_input_artifact",
     "build_pit_ttm_revenue_snapshots",
+    "build_pit_ttm_operating_cashflow_snapshots",
     "build_sales_to_price_input_artifact",
     "build_reversal_execution_input_artifact",
     "evaluate_single_factor",

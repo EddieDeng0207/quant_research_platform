@@ -104,6 +104,37 @@ SP_TTM = FactorDefinition(
     version="sp_ttm_pit_v1",
 )
 
+CFP_TTM = FactorDefinition(
+    name="cfp_ttm",
+    display_name="Operating Cash Flow-to-Price (TTM)",
+    family="fundamental",
+    category="valuation_quality",
+    layer="raw_signal",
+    frequency="weekly_decision_quarterly_information",
+    expected_direction=1,
+    formula=(
+        "pit_ttm_net_operating_cash_flow_cny / "
+        "decision_date_total_market_value_cny"
+    ),
+    required_datasets=(
+        "fundamentals_cashflow",
+        "daily_indicators",
+        "historical_industry_membership",
+        "tradability",
+    ),
+    point_in_time_policy=(
+        "each TTM component uses the latest unambiguous cash-flow statement version "
+        "available at decision_at and ingested no later than research_as_of_at"
+    ),
+    missing_value_policy=(
+        "no annualization or zero fill; missing TTM components, stale reports, and "
+        "unsupported company types produce NaN; finite negative operating cash flow "
+        "is retained as economically adverse information"
+    ),
+    company_scope="ordinary_industrial_comp_type_1",
+    version="cfp_ttm_pit_v1",
+)
+
 REV20_SKIP1 = FactorDefinition(
     name="rev20_skip1",
     display_name="20-session Reversal, Skip Most Recent Session",
@@ -120,4 +151,4 @@ REV20_SKIP1 = FactorDefinition(
     version="rev20_skip1_pit_v2",
 )
 
-DEFAULT_FACTOR_REGISTRY = FactorRegistry((SP_TTM, REV20_SKIP1))
+DEFAULT_FACTOR_REGISTRY = FactorRegistry((CFP_TTM, SP_TTM, REV20_SKIP1))

@@ -38,7 +38,11 @@ class FakeTushareClient:
             }
         )
 
-    income_vip = income
+    @staticmethod
+    def income_vip(**kwargs):
+        if kwargs.get("offset", 0) > 0:
+            return pd.DataFrame()
+        return FakeTushareClient.income(**kwargs)
 
     @staticmethod
     def adj_factor(**kwargs):
@@ -206,6 +210,8 @@ class TushareProviderTests(unittest.TestCase):
         class NonstandardVipClient(FakeTushareClient):
             @staticmethod
             def income_vip(**kwargs):
+                if kwargs.get("offset", 0) > 0:
+                    return pd.DataFrame()
                 frame = FakeTushareClient.income(**kwargs)
                 frame["ts_code"] = "X24035.BJ"
                 return frame
@@ -222,6 +228,8 @@ class TushareProviderTests(unittest.TestCase):
         class MissingAnnouncementClient(FakeTushareClient):
             @staticmethod
             def income_vip(**kwargs):
+                if kwargs.get("offset", 0) > 0:
+                    return pd.DataFrame()
                 frame = FakeTushareClient.income(**kwargs)
                 frame["ann_date"] = None
                 frame["f_ann_date"] = None
@@ -513,6 +521,8 @@ class TushareProviderTests(unittest.TestCase):
         self.assertEqual(len(frame), 6001)
         self.assertEqual(metadata["requests"], 2)
         self.assertEqual(metadata["pages_with_data"], 2)
+        self.assertEqual(metadata["termination"], "short_page_below_reviewed_request_size")
+        self.assertEqual(metadata["returned_page_sizes"], [6000, 1])
 
     def test_pagination_rejects_repeated_pages(self):
         class RepeatedPageClient:
@@ -524,6 +534,34 @@ class TushareProviderTests(unittest.TestCase):
             TushareProvider(client=RepeatedPageClient())._fetch_paginated(
                 "daily", {"trade_date": "20240102"}
             )
+
+    def test_vip_pagination_exhausts_hidden_server_cap_before_stopping(self):
+        class HiddenCapClient:
+            calls = []
+
+            @classmethod
+            def cashflow_vip(cls, **kwargs):
+                cls.calls.append((kwargs["limit"], kwargs["offset"]))
+                if kwargs["offset"] == 0:
+                    return pd.DataFrame({"row": range(6400)})
+                if kwargs["offset"] == 6400:
+                    return pd.DataFrame({"row": range(6400, 6500)})
+                return pd.DataFrame({"row": pd.Series(dtype="int64")})
+
+        frame, metadata = TushareProvider(client=HiddenCapClient())._fetch_paginated(
+            "cashflow_vip", {"period": "20230331"}
+        )
+
+        self.assertEqual(
+            HiddenCapClient.calls,
+            [(9000, 0), (9000, 6400), (9000, 6500)],
+        )
+        self.assertEqual(len(frame), 6500)
+        self.assertEqual(metadata["requests"], 3)
+        self.assertEqual(metadata["pages_with_data"], 2)
+        self.assertEqual(metadata["termination"], "explicit_empty_page")
+        self.assertEqual(metadata["returned_page_sizes"], [6400, 100])
+        self.assertEqual(metadata["offset_advance_policy"], "actual_rows_returned")
 
 
 if __name__ == "__main__":

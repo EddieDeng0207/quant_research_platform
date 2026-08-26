@@ -62,10 +62,12 @@ from .execution import (
 )
 from .research import (
     RESEARCH_UNIVERSE_PROFILES,
+    CashFlowToPriceInputSpec,
     FactorEvaluationSpec,
     FactorExecutionInputSpec,
     PriceReversalInputSpec,
     SalesToPriceInputSpec,
+    build_cashflow_to_price_input_artifact,
     build_factor_evaluation_artifact,
     build_factor_execution_input_artifact,
     build_price_reversal_input_artifact,
@@ -552,6 +554,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="allow exploratory output without a clean committed Git identity",
     )
 
+    cfp_inputs = subparsers.add_parser(
+        "build-cashflow-to-price-inputs",
+        help="build PIT TTM operating-cash-flow-to-price observations and labels",
+    )
+    cfp_inputs.add_argument("--fundamentals-artifact", required=True)
+    cfp_inputs.add_argument("--tradability-artifact", action="append", required=True)
+    cfp_inputs.add_argument("--industry-artifact", required=True)
+    cfp_inputs.add_argument("--aliases", default="configs/instrument_aliases.json")
+    cfp_inputs.add_argument("--start", required=True)
+    cfp_inputs.add_argument("--end", required=True)
+    cfp_inputs.add_argument("--research-as-of-at", required=True)
+    cfp_inputs.add_argument("--max-report-age-days", type=int, default=550)
+    cfp_inputs.add_argument(
+        "--research-universe",
+        choices=tuple(RESEARCH_UNIVERSE_PROFILES),
+        default="cn_a_full",
+    )
+    cfp_inputs.add_argument("--min-listing-sessions", type=int, default=120)
+    cfp_inputs.add_argument("--horizon", action="append", type=int)
+    cfp_inputs.add_argument("--data-root", default="data/lake")
+    cfp_inputs.add_argument("--output-root", default="data/curated")
+    cfp_inputs.add_argument(
+        "--allow-dirty-code",
+        action="store_true",
+        help="allow exploratory output without a clean committed Git identity",
+    )
+
     factor_execution = subparsers.add_parser(
         "build-factor-execution-inputs",
         help="freeze any promoted P0.7 factor targets and lagged P0.6.3 capacity inputs",
@@ -856,6 +885,27 @@ def main(argv: List[str] = None) -> int:
             require_clean_git=not args.allow_dirty_code,
         )
         print(f"built sales-to-price input artifact -> {output}")
+        return 0
+    if args.command == "build-cashflow-to-price-inputs":
+        output = build_cashflow_to_price_input_artifact(
+            fundamentals_artifact=Path(args.fundamentals_artifact),
+            tradability_artifacts=[Path(value) for value in args.tradability_artifact],
+            lake_root=Path(args.data_root),
+            industry_artifact=Path(args.industry_artifact),
+            aliases_path=Path(args.aliases),
+            output_root=Path(args.output_root),
+            start_date=args.start,
+            end_date=args.end,
+            research_as_of_at=args.research_as_of_at,
+            spec=CashFlowToPriceInputSpec(
+                max_report_age_days=args.max_report_age_days,
+                min_listing_sessions=args.min_listing_sessions,
+                horizons=tuple(args.horizon or (5, 10, 20, 60)),
+            ),
+            universe_spec=RESEARCH_UNIVERSE_PROFILES[args.research_universe],
+            require_clean_git=not args.allow_dirty_code,
+        )
+        print(f"built cashflow-to-price input artifact -> {output}")
         return 0
     if args.command in {
         "build-factor-execution-inputs",
