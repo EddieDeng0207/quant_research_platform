@@ -98,6 +98,24 @@ raw 层不按 `update_flag` 删除记录，不覆盖原始版，不把今天的�
 
 `build-fundamentals-pit` 只接受状态为 `completed` 的 backfill run。它验证：
 
+### VIP 分页完整性
+
+全市场财务 VIP 接口的请求 `limit` 不是供应商实际返回上限的可靠证明。平台曾观测到
+`cashflow_vip` 在请求 9,000 行时静默只返回 6,400 行；若用
+`returned_rows < requested_limit` 判定末页，会截断后续记录。
+
+因此，四个财务 VIP 接口采用以下冻结规则：
+
+- `offset` 按上一页实际返回行数推进，不按请求页长推进；
+- 即使返回行数小于请求 `limit`，仍继续请求；
+- 只有收到明确空页才证明分页结束；
+- 重复页哈希、空值响应或超过最大页数均 fail closed；
+- 原始快照元数据记录 `returned_page_sizes`、`termination` 和
+  `offset_advance_policy`，供后续审计。
+
+2026-08 的修复回补使完整现金流 PIT 产物由 257,495 行恢复到 322,711 行；旧产物
+保持不可变，但不得用于正式 CFP 研究。
+
 1. checkpoint 包含完整的报表 × 股票任务笛卡尔积；
 2. 每个输入路径存在于 raw manifest；
 3. 文件 SHA-256、行数、dataset 与任务身份一致；

@@ -1,7 +1,16 @@
 import pandas as pd
 import pytest
 
-from qrp.research.factor_registry import DEFAULT_FACTOR_REGISTRY, SP_TTM, FactorDefinition
+from qrp.research.cashflow_factors import (
+    CashFlowToPriceInputSpec,
+    build_pit_ttm_operating_cashflow_snapshots,
+)
+from qrp.research.factor_registry import (
+    CFP_TTM,
+    DEFAULT_FACTOR_REGISTRY,
+    SP_TTM,
+    FactorDefinition,
+)
 from qrp.research.fundamental_factors import (
     FundamentalFactorError,
     SalesToPriceInputSpec,
@@ -48,6 +57,20 @@ def _decisions(*dates: str) -> pd.DataFrame:
     )
 
 
+def _cashflow_row(
+    period: str,
+    operating_cashflow: float,
+    available: str,
+    version: str,
+    *,
+    update_flag: str = "1",
+):
+    row = _income_row(period, 0.0, available, version, update_flag=update_flag)
+    row.pop("revenue")
+    row["n_cashflow_act"] = operating_cashflow
+    return row
+
+
 def test_sp_registry_separates_raw_factor_from_selection_layer():
     assert DEFAULT_FACTOR_REGISTRY.get("sp_ttm") == SP_TTM
     assert SP_TTM.layer == "raw_signal"
@@ -69,6 +92,55 @@ def test_sp_registry_separates_raw_factor_from_selection_layer():
             company_scope="x",
             version="v1",
         ).validate()
+
+
+def test_cfp_registry_freezes_negative_values_as_information():
+    assert DEFAULT_FACTOR_REGISTRY.get("cfp_ttm") == CFP_TTM
+    assert CFP_TTM.expected_direction == 1
+    assert "negative operating cash flow is retained" in CFP_TTM.missing_value_policy
+
+
+def test_ttm_operating_cashflow_replays_revisions_and_retains_negative_values():
+    cashflow = pd.DataFrame(
+        [
+            _cashflow_row("2022-03-31", 20.0, "2022-04-30 01:30", "q1_22"),
+            _cashflow_row("2022-12-31", 100.0, "2023-04-20 01:30", "fy_22"),
+            _cashflow_row(
+                "2023-03-31", -40.0, "2023-04-28 01:30", "q1_23_original", update_flag="0"
+            ),
+            _cashflow_row("2023-03-31", 35.0, "2023-06-01 01:30", "q1_23_revision"),
+        ]
+    )
+
+    result = build_pit_ttm_operating_cashflow_snapshots(
+        cashflow,
+        _decisions("2023-05-05", "2023-06-02"),
+        "2026-08-17T00:00:00Z",
+    ).sort_values("decision_at")
+
+    assert result.iloc[0]["ttm_operating_cashflow"] == pytest.approx(40.0)
+    assert result.iloc[1]["ttm_operating_cashflow"] == pytest.approx(115.0)
+    assert result["ttm_status"].eq("ok").all()
+
+
+def test_cfp_keeps_negative_annual_operating_cashflow_instead_of_zero_filling():
+    result = build_pit_ttm_operating_cashflow_snapshots(
+        pd.DataFrame(
+            [_cashflow_row("2022-12-31", -25.0, "2023-04-20 01:30", "fy_22")]
+        ),
+        _decisions("2023-05-05"),
+        "2026-08-17T00:00:00Z",
+    )
+
+    assert result.iloc[0]["ttm_operating_cashflow"] == pytest.approx(-25.0)
+    assert result.iloc[0]["ttm_status"] == "ok"
+
+
+def test_cfp_spec_rejects_field_and_unit_drift():
+    with pytest.raises(ValueError, match="n_cashflow_act"):
+        CashFlowToPriceInputSpec(operating_cashflow_column="free_cashflow").validate()
+    with pytest.raises(ValueError, match="normalized to CNY"):
+        CashFlowToPriceInputSpec(market_value_unit="10k_CNY").validate()
 
 
 def test_ttm_revenue_replays_revisions_at_their_actual_availability():
