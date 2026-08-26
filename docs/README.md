@@ -43,10 +43,11 @@
 
 ## 当前正式研究结论
 
-1. [SP 2016–2026 单因子评测](research/sp_ttm_factor_evaluation_2016_2026.md)
-2. [SP 2023 P0.6.3 成交回测](research/sp_ttm_p063_2023.md)
-3. [SP 与 rev20_skip1 净经济性对照](research/sp_vs_rev20_net_economics_2023.md)
-4. [rev20_skip1 长停牌估值有界回测](research/rev20_skip1_p063_2023_bounded_v3.md)
+1. [CFP 2016–2026 单因子评测](research/cfp_ttm_factor_evaluation_2016_2026.md)
+2. [SP 2016–2026 单因子评测](research/sp_ttm_factor_evaluation_2016_2026.md)
+3. [SP 2023 P0.6.3 成交回测](research/sp_ttm_p063_2023.md)
+4. [SP 与 rev20_skip1 净经济性对照](research/sp_vs_rev20_net_economics_2023.md)
+5. [rev20_skip1 长停牌估值有界回测](research/rev20_skip1_p063_2023_bounded_v3.md)
 
 带 `_diagnostic`、`_v2` 或更早结论版本的文件为审计保留，不代表当前正式口径。详细状态见[研究报告索引](research/README.md)。
 
