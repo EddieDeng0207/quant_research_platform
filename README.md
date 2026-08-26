@@ -47,30 +47,31 @@ flowchart LR
 | P0.6.2 | 公司行为、事件时钟与逐日组合账本 | 已完成 | [组合回测标准](docs/p062_portfolio_backtest_standard.md) |
 | P0.6.3 | 波动率冲击、最低佣金、容量与估值边界 | 已完成 | [交易成本标准](docs/p063_execution_cost_standard.md) |
 | P0.7 | PIT 单因子评测与组合暴露门禁 | 已完成 | [单因子评测标准](docs/p07_single_factor_evaluation_standard.md) |
-| 因子研究 | rev20_skip1 与 SP 的端到端实验 | 已完成首轮 | [研究报告索引](docs/research/README.md) |
+| 因子研究 | rev20_skip1、SP 与 CFP 的端到端实验 | 已完成三项 | [研究报告索引](docs/research/README.md) |
 | 组合构建 | 持股数、缓冲区、多因子合成与约束优化 | 下一阶段 | [研究路线](docs/project_journey.md) |
 
 模块编号表示工程职责，不完全代表开发先后顺序。完整建设过程见[项目演进与关键决策](docs/project_journey.md)。
 
 ## 已贯通的研究案例
 
-首轮使用两个换手特征相反的因子检验全链路：
+当前使用三个因子检验全链路：
 
 - `rev20_skip1`：跳过最近一日的 20 日反转，日频变化、预期高换手；
 - `sp_ttm`：PIT TTM 营业收入 / 决策时点市值，财报驱动、预期低换手。
+- `cfp_ttm`：PIT TTM 经营现金流 / 决策时点市值，保留负现金流并验证现金流数据链。
 
 在相同的 2023 年可交易域、1,000 万元初始资金、公司行为、费用和执行情景下：
 
-| 基础执行指标 | SP | rev20_skip1 |
-|---|---:|---:|
-| 净收益 | 12.57% | 2.41% |
-| 代理毛收益 | 14.73% | 11.44% |
-| 费用与滑点 / 初始资金 | 2.16% | 9.03% |
-| 成本占代理毛利 | 14.68% | 78.95% |
-| 成交额 / 平均 NAV | 7.21x | 37.99x |
-| 最大回撤 | -10.05% | -14.81% |
+| 基础执行指标 | CFP | SP | rev20_skip1 |
+|---|---:|---:|---:|
+| 净收益 | 12.24% | 12.57% | 2.41% |
+| 代理毛收益 | 14.64% | 14.73% | 11.44% |
+| 费用与滑点 / 初始资金 | 2.40% | 2.16% | 9.03% |
+| 成本占代理毛利 | 16.39% | 14.68% | 78.95% |
+| 成交额 / 平均 NAV | 8.48x | 7.21x | 37.99x |
+| 最大回撤 | -10.02% | -10.05% | -14.81% |
 
-结果支持“反转收益主要被高换手侵蚀，而非所有因子都无法穿过成本层”。但这不是实盘承诺：SP 仍存在小额订单过多、严格容量下界为零和单年执行样本有限等问题。完整口径和限制见 [SP 与 rev20 净经济性对照](docs/research/sp_vs_rev20_net_economics_2023.md)。
+结果支持“反转收益主要被高换手侵蚀，而非所有因子都无法穿过成本层”。CFP 的 IC 高于 SP，但净收益略低，进一步说明 IC 不能替代成本评测。这不是实盘承诺：两个基本面组合仍存在订单过碎、严格容量下界为零和单年执行样本有限等问题。完整口径见 [CFP 与 SP 净经济性对照](docs/research/cfp_vs_sp_net_economics_2023.md)及[SP 与反转对照](docs/research/sp_vs_rev20_net_economics_2023.md)。
 
 ## 快速开始
 
@@ -147,7 +148,9 @@ quant_research_platform/
 5. [P0.6.3 交易成本标准](docs/p063_execution_cost_standard.md)：理解净收益如何形成；
 6. [SP 正式 P0.7 报告](docs/research/sp_ttm_factor_evaluation_2016_2026.md)；
 7. [SP 正式 P0.6.3 报告](docs/research/sp_ttm_p063_2023.md)；
-8. [SP 与反转因子对照结论](docs/research/sp_vs_rev20_net_economics_2023.md)。
+8. [CFP 正式 P0.7 报告](docs/research/cfp_ttm_factor_evaluation_2016_2026.md)；
+9. [CFP 正式 P0.6.3 报告](docs/research/cfp_ttm_p063_2023.md)；
+10. [CFP 与 SP 净经济性对照](docs/research/cfp_vs_sp_net_economics_2023.md)。
 
 全部文档的用途和权威状态见[文档中心](docs/README.md)。
 
